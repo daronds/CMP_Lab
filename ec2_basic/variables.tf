@@ -25,7 +25,7 @@ variable "ec2_name" {
 
 variable "subnet_id" {
   type = string
-  default = "subnet-########"
+  default = "subnet-0f74c2154f72de224"
 }
 
 variable "associate_public_ip_address" {
