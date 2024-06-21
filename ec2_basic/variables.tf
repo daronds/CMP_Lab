@@ -32,3 +32,8 @@ variable "associate_public_ip_address" {
   type = bool
   default = false
 }
+
+variable "security_group_id" {
+  type    = string
+  default = "sg-021d22d310b69d42d"
+}
