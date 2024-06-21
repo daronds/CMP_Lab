@@ -50,7 +50,7 @@ resource "aws_s3_bucket_acl" "b1" {
 
 resource "aws_s3_bucket_policy" "policy" {
   depends_on = [ aws_s3_bucket_acl.b1 ]
-  bucket = aws_s3_bucket.b1.id
+  bucket = aws_s3_bucket.b1.bucket
   policy = templatefile("resources/policy.json", { bucket = var.bucket_name })
 }
 
