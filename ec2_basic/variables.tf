@@ -35,5 +35,5 @@ variable "associate_public_ip_address" {
 
 variable "security_group_id" {
   type    = string
-  default = "sg-021d22d310b69d42d"
+  default = "sg-0cfdbee0872e762ab"
 }
