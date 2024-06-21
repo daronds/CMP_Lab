@@ -10,7 +10,7 @@ variable "group" {
 
 variable "ami_id" {
   type = string
-  default = "ami-#################"
+  default = "ami-08a0d1e16fc3f61ea"
 }
 
 variable "instance_type" {
