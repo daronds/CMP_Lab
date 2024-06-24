@@ -1,0 +1,162 @@
+name: Run Release Tests Ad-Hoc
+on:
+  workflow_dispatch:
+    inputs:
+      test-automation-branch:
+        description: |
+          The branch in test-automation from which the tests should be run (Example: 'develop', or 'CMP-xxx-test-fixes')
+        type: string
+        required: false
+        default: develop
+      hui-additional-options:
+        description: |
+          Additional options to pass to pytest for HUI tests. (Example: -m for including/excluding marked tests, or -k for specifying keywords)
+        required: false
+        type: string
+        default: ""
+      api-additional-options:
+        description: |
+          Additional options to pass to pytest for API tests. (Example: -m for including/excluding marked tests, or -k for specifying keywords)
+        required: false
+        type: string
+        default: ""
+      type:
+        description: |
+          The type of upgrader to run (e.g "PR", "GA")
+        required: true
+        type: choice
+        options:
+          - PR
+          - GA
+      number:
+        description: |
+          The PR number or GA version of the upgrader to run (e.g. "1234" for PR 1234 or "2024.1.77" for GA)
+        required: true
+      environment:
+        description: |
+          The environment to use for deployment
+        required: false
+        type: choice
+        options:
+          - Smoke Tests
+          - staging
+        default: Smoke Tests
+      create_snapshot:
+        description: |
+          Create a snapshot of the instance after the tests have been run for debugging
+        type: boolean
+        required: false
+        default: true
+      test-instance-ip:
+        description: |
+          The IP of an already-existing instance (optional - leave blank to deploy an EC2 instance)
+        type: string
+        required: false
+        default: ""
+      dist:
+        description: |
+          How to distribute tests.
+          loadscope -> grouped by module
+          loadfile -> grouped by containing file
+          load -> default
+          worksteal -> tests are distributed as runners become available
+          https://pytest-xdist.readthedocs.io/en/latest/distribution.html
+        type: choice
+        options:
+          - load
+          - loadscope
+          - loadfile
+          - loadgroup
+          - worksteal
+        default: load
+      numprocesses:
+        default: auto
+        description: |
+          Pass --numprocesses auto to use as many processes as your computer has CPU cores.
+          This can lead to considerable speed ups, especially if your test
+          suite takes a noticeable amount of time. Pass 1 to run only one test at a time.
+        type: string
+
+
+jobs:
+  get-upgrader-url:
+    if: ${{ !inputs.test-instance-ip }}
+    name: Fetch Presigned Upgrader URL
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+    outputs:
+      url: ${{ steps.get-upgrader-url.outputs.url }}
+    steps:
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+
+      - name: Fetch Presigned Upgrader URL
+        id: get-upgrader-url
+        shell:
+          bash -leo pipefail {0}
+        run: |
+          PRESIGNED_URL="$(./.github/assets/fetch_cmp_upgrader_link.sh \
+          --type ${{ inputs.type }} \
+          --number ${{ inputs.number }} \
+          --version ${{ inputs.number }} \
+          --presigned)"
+          echo "url=$PRESIGNED_URL" >> $GITHUB_OUTPUT
+          echo "Presigned URL: $PRESIGNED_URL"
+          echo "__Presigned URL__: $PRESIGNED_URL" >> $GITHUB_STEP_SUMMARY
+
+  setup-regression-tests:
+    uses: ./.github/workflows/setup-regression-tests.yml
+    if: ${{ !inputs.test-instance-ip }}
+    needs:
+      - get-upgrader-url
+    with:
+      upgrader_presigned_url: ${{ needs.get-upgrader-url.outputs.url }}
+      environment: ${{ inputs.environment }}
+    secrets: inherit
+
+  run-regression-tests:
+    name: Launch Regression Tests
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        arrays: [ { test-suite-path: "./cmp/ui/hui/tests", additional-options: "${{ inputs.hui-additional-options }}", test-area: "HUI" },
+                  { test-suite-path: "./cmp/api/tests", additional-options: "${{ inputs.api-additional-options }}", test-area: "API" } ]
+    uses: ./.github/workflows/rc-validation-test.yml
+    needs:
+      - setup-regression-tests
+    if: |
+      always() &&
+      (needs.setup-regression-tests.result == 'success' || needs.setup-regression-tests.result == 'skipped')
+    with:
+      ip: ${{ needs.setup-regression-tests.outputs.ip-address || inputs.test-instance-ip }}
+      test_suite_path: ${{ matrix.arrays.test-suite-path }}
+      release_tag: ${{ inputs.number }}
+      environment: ${{ inputs.environment }}
+      type: ${{ inputs.type }}-AdHoc
+      dist: ${{ inputs.dist }}
+      numprocesses: ${{ inputs.numprocesses }}
+      additional_options: ${{ matrix.arrays.additional-options }}
+      test_area: ${{ matrix.arrays.test-area }}
+      test-automation-branch: ${{ inputs.test-automation-branch }}
+
+    secrets: inherit
+
+  terminate-ec2-instance:
+    uses: ./.github/workflows/terminate-ec2-cloudbolt-instance.yml
+    needs:
+      - setup-regression-tests
+      - run-regression-tests
+    if: ${{ always() && needs.setup-regression-tests.result == 'success' }}
+    with:
+      environment: ${{ inputs.environment }}
+      instance_id: ${{ needs.setup-regression-tests.outputs.ec2-instance-id }}
+      launch_template_name: CloudBolt-GA
+      create_snapshot_before_terminate: ${{ inputs.create_snapshot }}
+    secrets: inherit

@@ -1,0 +1,94 @@
+name: Setup Regression Tests
+on:
+  workflow_call:
+    inputs:
+      upgrader_presigned_url:
+        type: string
+        description: Presigned URL for the upgrader
+        required: true
+      environment:
+        type: string
+        description: The environment from which the EC2 instance should be deployed
+        required: true
+
+    outputs:
+      ip-address:
+        description: The IP address of the EC2 instance
+        value: ${{ jobs.setup-regression-test.outputs.ip-address }}
+      ec2-instance-id:
+        description: The EC2 instance id
+        value: ${{ jobs.setup-regression-test.outputs.ec2-instance-id }}
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  setup-regression-test:
+    outputs:
+      ip-address: ${{ steps.launch-ec2-instance.outputs.ip_address }}
+      ec2-instance-id: ${{ steps.launch-ec2-instance.outputs.instance_id }}
+    name: Setup Regression Test Environment
+    runs-on:
+      - self-hosted
+      - ubuntu
+      - m7a-xlarge
+    environment:
+      name: ${{ inputs.environment }}
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-skip-session-tagging: true
+
+      - name: Launch CloudBolt-GA EC2 Instance
+        id: launch-ec2-instance
+        uses: CloudBoltSoftware/launch-ec2-template-action@v1.3.2
+        with:
+          launch_template_name: CloudBolt-GA
+          aws_region: ${{ vars.AWS_REGION }}
+          terminate: false
+
+      - name: Upgrade CMP Instance
+        uses: CloudBoltSoftware/upgrade-cmp-action@v1.0.4
+        with:
+          ip-address: ${{ steps.launch-ec2-instance.outputs.ip_address }}
+          ssh-key: ${{ secrets.SSH_KEY }}
+          ssh-user: ${{ vars.SSH_USER }}
+          upgrader-url: ${{ inputs.upgrader_presigned_url }}
+
+      - name: Configure CMP
+        uses: CloudBoltSoftware/configure-cmp-action@v1.3.2
+        with:
+          ip-address: ${{ steps.launch-ec2-instance.outputs.ip_address }}
+          ssh-key: ${{ secrets.SSH_KEY }}
+          ssh-user: ${{ vars.SSH_USER }}
+          ec2-instance-id: ${{ steps.launch-ec2-instance.outputs.instance_id }}
+          disable-configurator: true
+          license: ${{ secrets.LICENSE }}
+          disable-guided-setup: true
+
+      - name: Wait for CMP to be ready
+        uses: CloudBoltSoftware/wait-for-cmp-readiness-action@v1.1.0
+        with:
+          ip: ${{ steps.launch-ec2-instance.outputs.ip_address }}
+          protocol: https
+          timeout: 300
+
+      - name: Set Outputs
+        run: |
+          echo "| Key | Description| Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| ip | IP address of the CloudBolt server used for smoke tests | ${{ steps.launch-ec2-instance.outputs.ip_address }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ec2-instance | EC2 instance ID of the CloudBolt server used for smoke tests | ${{ steps.launch-ec2-instance.outputs.instance_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo " " >> $GITHUB_STEP_SUMMARY

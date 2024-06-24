@@ -1,0 +1,8 @@
+paths:
+  - src
+
+paths-ignore:
+  - "**/node_modules"
+  - "**/vendor"
+  - "src/static_src/js"
+  - "src/static_src/static/js"

@@ -1,0 +1,12 @@
+name: Run unit tests with full crypto enabled
+
+on:
+  schedule:
+    - cron: '30 19 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-unit-tests-with-crypto:
+    uses: ./.github/workflows/unit_tests.yaml
+    with:
+      full-crypto-flag: true

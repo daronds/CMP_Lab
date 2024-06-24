@@ -1,0 +1,70 @@
+name: Generate SwaggerHub API Docs
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The CloudBolt Release Version"
+        required: true
+      swaggerhub-apikey:
+        description: "The SwaggerHub API Key"
+        required: true
+      cloudbolt-branch:
+        description: "The cloudbolt branch"
+        required: true
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  generate-cloudbolt-api-docs:
+    name: Generate CloudBolt Global API Docs
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Checkout repo
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/checkout@v4.1.1
+        with:
+          ref: ${{ github.event.inputs.cloudbolt-branch }}
+          token: ${{ steps.generate-token.outputs.token }}
+          submodules: "recursive"
+
+      - name: Generate CloudBolt Global API Docs
+        uses: ./.github/actions/swaggerhub-apidocs
+        with:
+          swaggerhub-apikey: ${{ github.event.inputs.swaggerhub-apikey }}
+          version: ${{ github.event.inputs.version }}
+          project: CloudBolt-Dev
+          master-api: CloudBolt-Master
+          public-project: CloudBolt-Public
+          public-api: Cloudbolt-Global-API
+
+      - name: Generate CMP API Docs
+        uses: ./.github/actions/swaggerhub-apidocs
+        with:
+          swaggerhub-apikey: ${{ github.event.inputs.swaggerhub-apikey }}
+          version: ${{ github.event.inputs.version }}
+          project: CMP-Dev
+          master-api: CMP-Master
+          public-project: CMP-Public
+          public-api: Cloudbolt_CMP_API
+
+      - name: Generate OneFuse API Docs
+        uses: ./.github/actions/swaggerhub-apidocs
+        with:
+          swaggerhub-apikey: ${{ github.event.inputs.swaggerhub-apikey }}
+          version: ${{ github.event.inputs.version }}
+          project: OneFuse-Dev
+          master-api: OneFuse-Master
+          public-project: OneFuse-Public
+          public-api: OneFuse

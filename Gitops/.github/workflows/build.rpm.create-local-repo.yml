@@ -1,0 +1,95 @@
+name: 002 Create Local rpm Repo
+
+# This workflow is triggered by a workflow_call and workflow_dispatch with 'release_tag' input
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+    outputs:
+      minimal_repo_artifact:
+        description: The S3 localtion of the minimal repo artifact
+        value: ${{ jobs.create-minimal-repo.outputs.artifact }}
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+        required: true
+
+# Set shell options for all run commands
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  create-minimal-repo:
+    name: Create Minimal RHEL 8 RPM REPO
+    # The job will run on a self-hosted runner with oracle-linux-8 and small resources
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - m7a-large
+    env:
+      MINIMAL_RPM_REPO_NAME: cloudbolt_${{ github.event.inputs.release_tag || inputs.release_tag }}_minimal_rpm_repo.tar.gz 
+      S3_MINIMAL_RPM_REPO_S3_PATH: s3://cloudbolt-rpm-repo/${{ github.event.inputs.release_tag || inputs.release_tag }}/local-repo/
+    outputs:
+      artifact: ${{ steps.generate-outputs.outputs.s3_location }}
+
+    steps:
+      - name: Checkout Cloudbolt
+        uses: actions/checkout@v4.1.1
+
+      # Append /usr/local/bin to PATH
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      # Generate a token for the GitHub App
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Create local repo
+        run: >
+          mkdir -p ./cloudbolt-rpm-repo/
+ 
+      - name: Setup Cloudsmith
+        run: |
+          curl -1sLf 'https://pkgs.cloudbolt.io/public/cmp/setup.rpm.sh' | sudo -E bash
+          sudo dnf clean all
+
+      - name: Download non-rhel rpms
+        run: >
+          cat ./.github/assets/rpm-source-list.json 
+          | jq '{ Dependencies: [.Dependencies[] | select(.repository | contains("rhel") | not )] }'
+          | jq '.Dependencies[] | .package' -r
+          | xargs -t -I {} sh -c 'dnf download --resolve --repo cloudbolt-software-cmp --repo cloudbolt-software-cmp-noarch --downloaddir=./cloudbolt-rpm-repo/ --setopt=cloudbolt-software-cmp.module_hotfixes=1 --setopt=cloudbolt-software-cmp-noarch.module_hotfixes=1 {}'
+
+      - name: Create local repo
+        run: |
+          sudo dnf install -y createrepo
+          createrepo ./cloudbolt-rpm-repo/
+
+      - name: Add .repo file
+        run: |
+          cp ./.github/assets/cloudbolt-software-cmp.repo ./cloudbolt-rpm-repo/
+
+      - name: Create tar.gz of repo
+        run: |
+          tar -czvf ./${{ env.MINIMAL_RPM_REPO_NAME }} ./cloudbolt-rpm-repo
+
+      - name: Upload to S3
+        run: |
+          aws s3 cp ./${{ env.MINIMAL_RPM_REPO_NAME }} ${{ env.S3_MINIMAL_RPM_REPO_S3_PATH }}
+
+      # Output the S3 Location to the Step Summary
+      - name: Output S3 Location to Step Summary
+        id: generate-outputs
+        run: |
+          echo "${{ env.S3_MINIMAL_RPM_REPO_S3_PATH }}${{ env.MINIMAL_RPM_REPO_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "s3_location=${{ env.S3_MINIMAL_RPM_REPO_S3_PATH }}${{ env.MINIMAL_RPM_REPO_NAME }}" >> $GITHUB_OUTPUT

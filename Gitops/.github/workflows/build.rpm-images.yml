@@ -1,0 +1,76 @@
+name: 002 Build RPM Builder Images
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the container image
+        required: true
+  # push:
+    # branches:
+      # - devops/create-8s-rpm
+    # paths:
+      # - 'cloudbolt_installer/rpms/Dockerfile.*'
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  # This workflow contains a single job called "build"
+  build-rpm-builder-images:
+    name: Build ${{ matrix.base-image }} RPM Builder Images
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+
+    strategy:
+      fail-fast: false
+      matrix:
+        base-image:
+          - rockylinux8
+          - oraclelinux8
+          - rhel8
+          - centos7
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - uses: actions/checkout@v4.1.1
+        with:
+          path: main
+          token: ${{ steps.generate-token.outputs.token }}
+
+
+      - name: Build Docker Image
+        working-directory: main/cloudbolt_installer/rpm
+        env:
+          REDHAT_PASSWORD: ${{ secrets.RHEL_PASSWORD }}
+        run: |
+          docker build \
+          --platform linux/amd64 \
+          -f Dockerfile.${{ matrix.base-image }} \
+          -t ${{ matrix.base-image}}-rpmbuilder \
+          --build-arg REDHAT_PASSWORD=$REDHAT_PASSWORD .
+
+      - name: Tag Docker Image
+        run: |
+          docker tag ${{ matrix.base-image}}-rpmbuilder:latest 499620025628.dkr.ecr.us-east-1.amazonaws.com/${{ matrix.base-image }}-rpmbuilder:${{ github.event.inputs.release_tag || 'latest' }}
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 499620025628.dkr.ecr.us-east-1.amazonaws.com
+
+      - name: Push Docker Image to ECR
+        run: |
+          docker push 499620025628.dkr.ecr.us-east-1.amazonaws.com/${{ matrix.base-image }}-rpmbuilder:${{ github.event.inputs.release_tag || 'latest' }}
+      
+      - name: Output Tags
+        run: |
+          echo "## Image Tags" >> $GITHUB_STEP_SUMMARY
+          echo "- ${{ matrix.base-image }}-rpmbuilder:${{ github.event.inputs.release_tag || 'latest' }}" >> $GITHUB_STEP_SUMMARY

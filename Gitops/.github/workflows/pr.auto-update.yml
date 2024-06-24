@@ -1,0 +1,28 @@
+name: PR Auto Update
+
+on:
+  push:
+    branches:
+      - develop
+      - delivery/auto-update-prs
+
+jobs:
+  autoupdate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Automatically update PR
+        uses: adRise/update-pr-branch@v0.7.0
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          base: 'develop'
+          required_approval_count: 1
+          require_passed_checks: false
+          sort: 'created'
+          direction: 'desc'

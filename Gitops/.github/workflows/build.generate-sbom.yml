@@ -1,0 +1,33 @@
+name: SBOM Generation
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Release tag to generate SBOM for'
+        required: false
+jobs:
+  sbom-generation:
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Run SBOM Generation Workflow
+        uses: CloudBoltSoftware/generate-sbom-action@main
+        with:
+          repo: 'CloudBoltSoftware/cloudbolt'
+          release: ${{ github.event.inputs.release }}
+          artifact: '*el8.x86_64.rpm'   # Specify the artifact name
+          token: ${{ steps.generate-token.outputs.token }}
+          dry_run: 'false'    # Change to 'false' to upload to release

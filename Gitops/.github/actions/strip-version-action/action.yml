@@ -1,0 +1,33 @@
+name: 'Strip v From vXXXX.X.X'
+description: 'Strip the "v" from a version string'
+inputs:
+  version:
+    description: 'The version string to process'
+    required: true
+outputs:
+  version:
+    description: 'The stripped version string without the "v" prefix'
+    value: ${{ steps.strip-v.outputs.version }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Run the strip-version script
+      shell: bash
+      id: strip-v
+      run: |
+        strip_v() {
+          local input="$1"
+          # Check if the input starts with "v" followed by a number
+          if [[ $input =~ ^v[0-9]+ ]]; then
+            echo "$input" | sed 's/^v\([0-9]\)/\1/'
+          else
+            echo "Error: Invalid version string. It should start with 'v' followed by a number."
+            exit 1
+          fi
+        }
+
+        input_version="${{ inputs.version }}"
+        version=$(strip_v "$input_version")
+
+        echo "stripped version: $version"
+        echo "version=$version" >> $GITHUB_OUTPUT

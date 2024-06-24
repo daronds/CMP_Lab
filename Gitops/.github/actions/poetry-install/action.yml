@@ -1,0 +1,32 @@
+name: Poetry Install
+description: Installs poetry using Code Artifactory
+inputs:
+  domain-owner:
+    required: true
+    default: 499620025628
+  repository:
+    default: python
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Poetry Install Test
+      shell: bash -leo pipefail {0}
+      run: |
+        echo "::group::Get Authorization Token"
+        export CODEARTIFACT_AUTH_TOKEN=`aws codeartifact get-authorization-token --region us-east-1 --domain cloudbolt --domain-owner ${{ inputs.domain-owner }} --query authorizationToken --output text`
+        echo "::endgroup::"
+        echo "::group::Set Python Version from pyproject.toml"
+        eval "$(pyenv init -)"
+        pyenv shell $(nu -c 'open pyproject.toml | get tool | get poetry | get dependencies | get python')
+        echo "::endgroup::"
+        echo "::group::Configure Code Artifact Repository"
+        poetry config virtualenvs.in-project true
+        poetry config repositories.python https://cloudbolt-${{ inputs.domain-owner }}.d.codeartifact.us-east-1.amazonaws.com/pypi/python/simple/
+        poetry config http-basic.python aws $CODEARTIFACT_AUTH_TOKEN
+        echo "::endgroup::"
+        echo "::group::Install Python Packages"
+        poetry run pip install 'setuptools==57.5.0'
+        yum -y install openldap-devel
+        poetry install
+        echo "::endgroup::"

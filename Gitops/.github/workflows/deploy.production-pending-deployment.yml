@@ -1,0 +1,21 @@
+name: Register Production Pending Deployment with Jira
+on:
+  push:
+    branches:
+      - develop
+      - main
+jobs:
+  register:
+    name: Register Production Pending Deployment
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+    environment:
+      name: Production Pending Deployment
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+      - name: Register Production Pending Deployment
+        run: |
+          echo "Registering Production Pending Deployment"

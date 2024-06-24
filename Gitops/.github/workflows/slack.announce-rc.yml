@@ -1,0 +1,37 @@
+name: Slack Announce RC
+on:
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        type: string
+        description: 'The release tag to promote'
+        required: true
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  announce-rc:
+    name: Announce Release Candidate on Slack
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Announce Release Candidate
+        uses: ./.github/actions/announce-release-candidate
+        with:
+          release-tag: ${{ inputs.release-tag }}
+          slack-bot-token: ${{ secrets.SLACK_DM_BOT_TOKEN }}
+          dev-release-channel: ${{ vars.DEV_RELEASE_CHANNEL }}
+          github-token: ${{ steps.generate-token.outputs.token }}

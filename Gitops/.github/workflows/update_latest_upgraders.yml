@@ -1,0 +1,23 @@
+name: Promote Latest develop/RC Upgrader
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
+
+jobs:
+  update-latest-upgraders:
+    name: Update latest upgrader downloads.cloudbolt.io
+
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+
+    steps:
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Update latest develop/rc upgrader
+        run: |
+          aws s3 cp --quiet s3://cb-internal-builds/latest/cloudbolt-upgrader-latest.tgz s3://downloads.cloudbolt.io/cloudbolt-upgrader-nightly.tgz

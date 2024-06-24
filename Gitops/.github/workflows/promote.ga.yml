@@ -1,0 +1,369 @@
+run-name: GA Candidate Promotion (${{ inputs.release_tag }})
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        description: 'The release tag to promote'
+        required: true
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        description: 'The release tag to promote'
+        required: true
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  announce-rc:
+    name: Announce Release Candidate on Slack
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Announce Release Candidate
+        uses: ./.github/actions/announce-release-candidate
+        with:
+          release-tag: ${{ inputs.release_tag }}
+          slack-bot-token: ${{ secrets.SLACK_DM_BOT_TOKEN }}
+          dev-release-channel: ${{ vars.DEV_RELEASE_CHANNEL }}
+          github-token: ${{ steps.generate-token.outputs.token }}
+  build_ol8_ami:
+    name: Build Oracle Linux 8 AMI
+    uses: ./.github/workflows/build.oracle-linux-8-ami.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
+    secrets: inherit
+  generate-ccat-snapshot:
+    name: Generate CCAT Snapshot
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+
+      - name: Run Workflow Dispatch
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh workflow run
+          generate-ccat-snapshot.yml
+          -f tag=${{ github.event.inputs.release_tag || inputs.release_tag }}
+          -f prerelease=false
+  deploy_to_internal_production:
+    name: Deploy to Internal Production
+    uses: ./.github/workflows/deploy.internal-production.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
+    secrets: inherit
+  deploy_ol8_ova_to_production_verification:
+    name: Deploy OVA to Production Verification
+    environment:
+      name: Production OL8 OVA Verification
+      url: https://${{ steps.deploy-ova.outputs.ip }}
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    outputs:
+      s3_path: ${{ steps.output-s3-paths.outputs.s3_path }}
+    steps:
+      - name: Add usr/local/bin to PATH
+        run: |
+          echo "export PATH=/usr/local/bin:$PATH" >> $GITHUB_ENV
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Download Release Artifacts
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          #download the ova_el8.txt
+          gh release download
+          ${{ inputs.release_tag }}
+          --repo CloudBoltSoftware/cloudbolt
+          --pattern "ova_el8.txt"
+
+      - name: Output S3 Paths
+        id: output-s3-paths
+        run: >
+          aws s3 ls --recursive s3://${{ vars.S3_BUCKET }}/
+          | grep $(cat ./ova_el8.txt).ova
+          | tail -n 1
+          | echo $(awk '{print $4}')
+          | echo "s3_path=$(</dev/stdin)" >> $GITHUB_OUTPUT
+
+      - name: Deploy OVA from S3 to vCenter
+        id: deploy-ova
+        uses: CloudBoltSoftware/deploy-ova-to-vcenter-action@v1.0.1
+        with:
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          OVA_OBJECT_KEY: ${{ steps.output-s3-paths.outputs.s3_path }}
+          VCENTER_SERVER: ${{ vars.VCENTER_SERVER }}
+          VCENTER_USERNAME: ${{ vars.VCENTER_USERNAME }}
+          VCENTER_PASSWORD: ${{ secrets.VCENTER_PASSWORD }}
+          VCENTER_DATASTORE: ${{ vars.VCENTER_DATASTORE }}
+          VCENTER_NETWORK: ${{ vars.VCENTER_NETWORK }}
+          VCENTER_VM_FOLDER: ${{ vars.VCENTER_VM_FOLDER }}
+          VM_NAME: ${{ inputs.release_tag }} - Oracle Linux 8
+
+      - name: Run Tests Placeholder
+        run: |
+          echo "Run tests here"
+
+      - name: Cleanup Test VM
+        if: always()
+        env:
+          GOVC_URL: ${{ vars.VCENTER_SERVER }}
+          GOVC_USERNAME: ${{ vars.VCENTER_USERNAME }}
+          GOVC_PASSWORD: ${{ secrets.VCENTER_PASSWORD }}
+          GOVC_INSECURE: "true"
+        run: |
+          echo "Cleaning up the test VM..."
+          govc vm.destroy '${{ steps.deploy-ova.outputs.vm_name }}'
+
+  upload_to_downloads:
+    name: Upload GA to Production (downloads.cloudbolt.io)
+    environment: Production
+    permissions: write-all
+    needs:
+      - deploy_to_internal_production
+      - deploy_ol8_ova_to_production_verification
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    outputs:
+      upgrader_upload_path: ${{ steps.output-s3-upload-paths.outputs.upgrader_upload_path }}
+    steps:
+      - name: Add usr/local/bin to PATH
+        run: |
+          echo "export PATH=/usr/local/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+        with:
+          ref: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Promote Pre-release to Release
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh release edit
+          ${{ inputs.release_tag }}
+          --repo CloudBoltSoftware/cloudbolt
+          --prerelease=false
+          --latest
+          --verify-tag
+
+      - name: Download Release Artifacts
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh release download
+          ${{ inputs.release_tag }}
+          --repo CloudBoltSoftware/cloudbolt
+          --pattern "*.txt"
+          --pattern "info*"
+          --pattern "*.tgz.sha256sum"
+
+      - name: Format Tag as Version
+        id: format-tag-as-version
+        uses: ./.github/actions/strip-version-action
+        with:
+          version: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+
+      - name: Output S3 Paths
+        id: output-s3-paths
+        run: |
+          el8_ova_path=${{ steps.format-tag-as-version.outputs.version }}/$(cat ./ova_el8.txt).ova
+          el8_ova_sha_path=${{ steps.format-tag-as-version.outputs.version }}/$(cat ./ova_el8.txt)_sha256.checksum
+          el8_ova_location="s3://cb-internal-builds/$el8_ova_path"
+          el8_ova_sha_location="s3://cb-internal-builds/$el8_ova_sha_path"
+          installer_sha_file=(cloudbolt_installer*.sha256sum)
+          upgrader_sha_file=(cloudbolt_upgrader*.sha256sum)
+          installer_sha_path=${{ steps.format-tag-as-version.outputs.version }}/${installer_sha_file[*]}
+          upgrader_sha_path=${{ steps.format-tag-as-version.outputs.version }}/${upgrader_sha_file[*]}
+          installer_sha_location="s3://cb-internal-builds/$installer_sha_path"
+          upgrader_sha_location="s3://cb-internal-builds/$upgrader_sha_path"
+
+          echo "installer_location=$(cat ./installer_location.txt)" >> $GITHUB_OUTPUT
+          echo "upgrader_location=$(cat ./upgrader_location.txt)" >> $GITHUB_OUTPUT
+          echo "el8_ova_location=$el8_ova_location" >> $GITHUB_OUTPUT
+          echo "el8_ova_sha_location=$el8_ova_sha_location" >> $GITHUB_OUTPUT
+          echo "el8_ova_path=$el8_ova_path" >> $GITHUB_OUTPUT
+          echo "el8_ova_sha_path=$el8_ova_sha_path" >> $GITHUB_OUTPUT
+          echo "installer_sha_location=$installer_sha_location" >> $GITHUB_OUTPUT
+          echo "upgrader_sha_location=$upgrader_sha_location" >> $GITHUB_OUTPUT
+          echo "upgrader_sha_path=$upgrader_sha_path" >> $GITHUB_OUTPUT
+          echo "installer_sha_path=$installer_sha_path" >> $GITHUB_OUTPUT
+
+      - name: Output S3 Upload Paths
+        id: output-s3-upload-paths
+        run: |
+          installer_path=$(awk -F's3://[^/]*' '{print $2}' ./installer_location.txt)
+          upgrader_path=$(awk -F's3://[^/]*' '{print $2}' ./upgrader_location.txt)
+          echo "installer_upload_path=$installer_path" >> $GITHUB_OUTPUT
+          echo "upgrader_upload_path=$upgrader_path" >> $GITHUB_OUTPUT
+
+      - name: Output S3 downloads.cloudbolt.io Paths
+        id: output-download-paths
+        run: |
+          installer_dl_path=s3://downloads.cloudbolt.io${{ steps.output-s3-upload-paths.outputs.installer_upload_path }}
+          upgrader_dl_path=s3://downloads.cloudbolt.io${{ steps.output-s3-upload-paths.outputs.upgrader_upload_path }}
+          ova_dl_path=s3://downloads.cloudbolt.io/${{ steps.output-s3-paths.outputs.el8_ova_path }}
+          installer_sha_dl_path=s3://downloads.cloudbolt.io/${{ steps.output-s3-paths.outputs.installer_sha_path }}
+          upgrader_sha_dl_path=s3://downloads.cloudbolt.io/${{ steps.output-s3-paths.outputs.upgrader_sha_path }}
+          ova_sha_dl_path=s3://downloads.cloudbolt.io/${{ steps.output-s3-paths.outputs.el8_ova_sha_path }}
+  
+          installer_prod_download_path=https://downloads.cloudbolt.io${{ steps.output-s3-upload-paths.outputs.installer_upload_path }}
+          upgrader_prod_download_path=https://downloads.cloudbolt.io${{ steps.output-s3-upload-paths.outputs.upgrader_upload_path }}
+          ova_prod_download_path=https://downloads.cloudbolt.io/${{ steps.output-s3-paths.outputs.el8_ova_path }}
+          
+        
+          echo "installer_dl_path=$installer_dl_path" >> $GITHUB_OUTPUT
+          echo "upgrader_dl_path=$upgrader_dl_path" >> $GITHUB_OUTPUT
+          echo "ova_dl_path=$ova_dl_path" >> $GITHUB_OUTPUT
+          echo "installer_sha_dl_path=$installer_sha_dl_path" >> $GITHUB_OUTPUT
+          echo "upgrader_sha_dl_path=$upgrader_sha_dl_path" >> $GITHUB_OUTPUT
+          echo "ova_sha_dl_path=$ova_sha_dl_path" >> $GITHUB_OUTPUT
+          
+          echo "installer_download_path_https=$installer_prod_download_path" >> $GITHUB_OUTPUT
+          echo "upgrader_download_path_https=$upgrader_prod_download_path" >> $GITHUB_OUTPUT
+          echo "ova_download_path_https=$ova_prod_download_path" >> $GITHUB_OUTPUT
+          
+          echo "installer_download_path_https: $installer_prod_download_path" >> $GITHUB_STEP_SUMMARY
+          echo "upgrader_download_path_https: $upgrader_prod_download_path" >> $GITHUB_STEP_SUMMARY
+          echo "ova_download_path_https: $ova_prod_download_path" >> $GITHUB_STEP_SUMMARY
+
+      - name: Output Checksums
+        id: output-checksums
+        run: |
+          aws s3 cp --no-progress ${{ steps.output-s3-paths.outputs.el8_ova_location }} ova_checksum
+          ova_xsum=$(sha256sum ./ova_checksum | awk '{print $1}')
+          installer_xsum=$(cat ./cloudbolt_installer*.sha256sum | cut -d " " -f 1)
+          upgrader_xsum=$(cat ./cloudbolt_upgrader*.sha256sum | cut -d " " -f 1)
+
+          echo "installer_checksum=$installer_xsum" >> $GITHUB_OUTPUT
+          echo "upgrader_checksum=$upgrader_xsum" >> $GITHUB_OUTPUT
+          echo "ova_checksum=$ova_xsum" >> $GITHUB_OUTPUT
+          echo "installer_checksum: $installer_xsum" >> $GITHUB_STEP_SUMMARY
+          echo "upgrader_checksum: $upgrader_xsum" >> $GITHUB_STEP_SUMMARY
+          echo "ova_checksum: $ova_xsum" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Release Files
+        run: |
+          aws s3 cp --no-progress ${{ steps.output-s3-paths.outputs.installer_location }} ${{ steps.output-download-paths.outputs.installer_dl_path }}
+          aws s3 cp --no-progress ${{ steps.output-s3-paths.outputs.upgrader_location }} ${{ steps.output-download-paths.outputs.upgrader_dl_path }}
+          aws s3 cp --no-progress ${{ steps.output-s3-paths.outputs.el8_ova_location }} ${{ steps.output-download-paths.outputs.ova_dl_path }}
+          aws s3 cp --no-progress ${{ steps.output-s3-paths.outputs.installer_sha_location }} ${{ steps.output-download-paths.outputs.installer_sha_dl_path }}
+          aws s3 cp --no-progress ${{ steps.output-s3-paths.outputs.upgrader_sha_location }} ${{ steps.output-download-paths.outputs.upgrader_sha_dl_path }}
+          aws s3 cp --no-progress ${{ steps.output-s3-paths.outputs.el8_ova_sha_location }} ${{ steps.output-download-paths.outputs.ova_sha_dl_path }}
+
+      - name: Test Downloads
+        id: test-downloads
+        run: |
+          curl -s -o installer_file ${{ steps.output-download-paths.outputs.installer_download_path_https }}
+          installer_size=$(du -sm ./installer_file | awk '{print $1}')
+          installer_xsum=$(sha256sum ./installer_file | awk '{print $1}')
+          echo "Installer size: $installer_size MB"
+          echo "Installer checksum: $installer_xsum"
+          curl -s -o upgrader_file ${{ steps.output-download-paths.outputs.upgrader_download_path_https }}
+          upgrader_size=$(du -sm ./upgrader_file | awk '{print $1}')
+          upgrader_xsum=$(sha256sum ./upgrader_file | awk '{print $1}')
+          echo "Upgrader size: $upgrader_size MB"
+          echo "Upgrader checksum: $upgrader_xsum"
+
+          curl -s -o ova_file ${{ steps.output-download-paths.outputs.ova_download_path_https }}
+          ova_size=$(du -sm ./ova_file | awk '{print $1}')
+          ova_xsum=$(sha256sum ./ova_file | awk '{print $1}')
+          echo "OVA size: $ova_size MB"
+          echo "OVA checksum: $ova_xsum"
+
+          echo "installer_size=$installer_size" >> $GITHUB_OUTPUT
+          echo "installer_checksum=$installer_xsum" >> $GITHUB_OUTPUT
+          echo "upgrader_size=$upgrader_size" >> $GITHUB_OUTPUT
+          echo "upgrader_checksum=$upgrader_xsum" >> $GITHUB_OUTPUT
+          echo "ova_size=$ova_size" >> $GITHUB_OUTPUT
+          echo "ova_checksum=$ova_xsum" >> $GITHUB_OUTPUT
+
+          echo "installer_size: $installer_size" >> $GITHUB_STEP_SUMMARY
+          echo "upgrader_size: $upgrader_size" >> $GITHUB_STEP_SUMMARY
+          echo "ova_size: $ova_size" >> $GITHUB_STEP_SUMMARY
+          echo "installer_checksum: $installer_xsum" >> $GITHUB_STEP_SUMMARY
+          echo "upgrader_checksum: $upgrader_xsum" >> $GITHUB_STEP_SUMMARY
+          echo "ova_checksum: $ova_xsum" >> $GITHUB_STEP_SUMMARY
+
+      - name: Validate OVA Checksums
+        if: ${{ steps.test-downloads.outputs.ova_checksum != steps.output-checksums.outputs.ova_checksum }}
+        run: exit 1
+
+      - name: Validate Upgrader Checksums
+        if: ${{ steps.test-downloads.outputs.upgrader_checksum != steps.output-checksums.outputs.upgrader_checksum }}
+        run: exit 1
+
+      - name: Validate Installer Checksums
+        if: ${{ steps.test-downloads.outputs.installer_checksum != steps.output-checksums.outputs.installer_checksum }}
+        run: exit 1
+
+      - name: Update GA JSON (cloudbolt9plus_ga_latest.json)
+        run: >
+          aws s3 cp ./info.json s3://downloads.cloudbolt.io/cloudbolt9plus_ga_latest.json
+
+      - name: Upload Latest Upgrader
+        run: >
+          aws s3 cp --no-progress ${{ steps.output-s3-paths.outputs.upgrader_location }} s3://downloads.cloudbolt.io/cloudbolt-upgrader-latest.tgz
+
+      - name: Upload Latest Installer
+        run: >
+          aws s3 cp --no-progress ${{ steps.output-s3-paths.outputs.installer_location }} s3://downloads.cloudbolt.io/cloudbolt-installer-latest.tgz
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          role-to-assume: arn:aws:iam::499620025628:role/github_action_cloudfront_invalidation
+          role-session-name: promote-ga-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Clear CloudFront Cache
+        continue-on-error: true
+        run: |
+          aws cloudfront create-invalidation --no-cli-pager --paths '/*' --distribution-id ${{ vars.DOWNLOADS_CLOUDFRONT_ID }}
+
+

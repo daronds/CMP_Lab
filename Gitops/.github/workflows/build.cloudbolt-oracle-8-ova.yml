@@ -1,0 +1,57 @@
+name: Build CloudBolt Oracle Linux 8 OVA
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: A release tag
+        required: false
+        default: v2022.3.1
+      environment:
+        description: The vsphere domain you're building in
+        required: true
+        default: 'cbsw.io'
+  workflow_call:
+    inputs:
+      release_tag:
+        description: A release tag
+        required: true
+        type: string
+      environment:
+        description: The vsphere domain you're building in
+        default: 'cbsw.io'
+        type: string
+    secrets:
+      SLACK_DEVOPS_GITHUB_ACTION_ALERTS_WEBHOOK:
+        description: |
+          Slack Token used to post to the devops-github-action-alerts slack channel
+        required: true
+      CLOUDBOLT_ACTION_HELPER_PEM:
+        description: Pem for the GitHub App that we use as a helper
+        required: true
+      KSM_CONFIG:
+        description: KSM configuration
+        required: true
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  build-ol8-ova:
+    name: Build OL8 OVA
+    environment: Build OL8 OVA
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+
+      - name: Build OL8 OVA
+        uses: ./.github/actions/build-ova-ol8
+        with:
+          release-tag: ${{ inputs.release_tag }}
+          cloudbolt-action-helper-pem: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+          ksm-config: ${{ secrets.KSM_CONFIG }}

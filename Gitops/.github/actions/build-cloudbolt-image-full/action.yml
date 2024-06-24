@@ -1,0 +1,74 @@
+name: Build CloudBolt Image Full
+description: Build full cloudbolt image with apache and systemd
+inputs:
+  installer-url:
+    required: true
+    description: "Location for the installer .tar file; typcially hosted within S3"
+  version:
+    default: 9.4.6.1
+    required: true
+  working-directory:
+    default: ${{ github.working-directory }}
+    required: true
+outputs:
+  image-tag:
+    value: ${{ steps.image-tag.outputs.image-tag }}
+runs:
+  using: "composite"
+  steps:
+    - name: Add /usr/local/bin to PATH
+      shell: bash -leo pipefail {0}
+      run: |
+        echo "/usr/local/bin" >> $GITHUB_PATH
+
+    - name: ECR Login
+      shell: bash -leo pipefail {0}
+      run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 499620025628.dkr.ecr.us-east-1.amazonaws.com
+
+    - name: Download Installer
+      shell: bash -leo pipefail {0}
+      run: |
+        # if inputs.install-url contains https then curl file else s3 copy
+        if [[ ${{ inputs.installer-url }} == *"https"* ]]; then
+          curl -L ${{inputs.installer-url}} -o ${{ inputs.working-directory }}/image_build/containers/installer.tgz
+        else
+          aws s3 cp --quiet ${{ inputs.installer-url }} ${{ inputs.working-directory }}/image_build/containers/installer.tgz
+        fi
+
+    - name: Docker Build
+      shell: bash -leo pipefail {0}
+      run: |
+        docker build -t cloudbolt --file ${{ inputs.working-directory }}/image_build/containers/Dockerfile ${{ inputs.working-directory }}/image_build
+
+    - name: Start Container
+      shell: bash -leo pipefail {0}
+      run: |
+        docker rm -f cloudbolt_build || true
+        docker run --name cloudbolt_build --privileged -v /sys/fs/cgroup:/sys/fs/cgroup:ro -d -i -t cloudbolt:latest /usr/sbin/init
+    
+    - name: Install Sudo
+      shell: bash -leo pipefail {0}
+      run: docker exec --privileged cloudbolt_build /bin/bash -c "yum install -y sudo"
+
+    - name: Install CloudBolt
+      shell: bash -leo pipefail {0}
+      run: docker exec --privileged cloudbolt_build /bin/bash -c "/tmp/local_customization.sh"
+
+    - name: Read Log Files
+      if: ${{ failure() }}
+      shell: bash -leo pipefail {0}
+      run: |
+        docker exec cloudbolt_build /bin/bash -c 'cat /var/log/cloudbolt/install/install*'
+
+    - name: Docker Commit (SystemD workaround)
+      shell: bash -leo pipefail {0}
+      run: docker commit cloudbolt_build 499620025628.dkr.ecr.us-east-1.amazonaws.com/cloudbolt:${{ inputs.version  }}
+    
+    - name: Delete installer
+      shell: bash -leo pipefail {0}
+      run: rm ${{ inputs.working-directory }}/image_build/containers/installer.tgz
+    
+    - name: Output Image Tag
+      id: image-tag
+      shell: bash -leo pipefail {0}
+      run: echo '::set-output name=image-tag::499620025628.dkr.ecr.us-east-1.amazonaws.com/cloudbolt:${{ inputs.version }}'

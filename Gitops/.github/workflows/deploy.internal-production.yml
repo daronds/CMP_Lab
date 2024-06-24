@@ -1,0 +1,117 @@
+name: Deploy to Internal Production
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+    
+
+concurrency: deploy-to-internal-production
+
+jobs:
+  get-upgrader-url:
+    name: Get Upgrader URL
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    outputs:
+      upgrader_url: ${{ steps.presign-urls.outputs.upgrader_location }}
+    steps:
+      - name: Add usr/local/bin to PATH
+        run: |
+          echo "export PATH=/usr/local/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Download Release Artifacts
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh release download
+          ${{ inputs.release_tag }}
+          --repo CloudBoltSoftware/cloudbolt
+          --pattern "*.txt"
+          --clobber
+
+      - name: Generate Presigned URLs
+        id: presign-urls
+        run: |
+          aws s3 presign $(cat ./upgrader_location.txt) | echo "upgrader_location=$(</dev/stdin)" >> $GITHUB_OUTPUT
+  deploy-to-internal-production:
+    name: Deploy to Internal Production
+    environment:
+      name: CMP Internal Production
+      url: 'https://${{ vars.IP_ADDRESS }}'
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    needs:
+      - get-upgrader-url
+    steps:
+      - uses: actions/checkout@v4.1.1
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-skip-session-tagging: true
+
+      - name: Upgrade CMP Instance
+        uses: CloudBoltSoftware/upgrade-cmp-action@v1.0.4
+        with:
+          ip-address: ${{ vars.IP_ADDRESS }}
+          ssh-key: ${{ secrets.SSH_KEY }}
+          ssh-user: ${{ vars.SSH_USERNAME }}
+          upgrader-url: ${{ needs.get-upgrader-url.outputs.upgrader_url }}
+
+      - name: Configure CMP
+        uses: CloudBoltSoftware/configure-cmp-action@v1.3.2
+        with:
+          ip-address: ${{ vars.IP_ADDRESS }}
+          ssh-key: ${{ secrets.SSH_KEY }}
+          ssh-user: ${{ vars.SSH_USERNAME }}
+          ec2-instance-id: ${{ vars.INSTANCE_ID }}
+
+      - name: Wait for CMP to be ready
+        uses: CloudBoltSoftware/wait-for-cmp-readiness-action@v1.1.0
+        with:
+          ip: ${{ vars.IP_ADDRESS }}
+          protocol: https
+          timeout: 300
+
+      - name: Set Outputs
+        id: set-outputs
+        run: |
+          echo "instance_id=${{ vars.INSTANCE_ID }}" >> $GITHUB_OUTPUT
+          echo "ip_address=${{  vars.IP_ADDRESS }}" >> $GITHUB_OUTPUT
+          echo "| Key | Description| Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| ip | IP address of the CloudBolt server used for internal production | ${{  vars.IP_ADDRESS }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ec2-instance | EC2 instance ID of the CloudBolt server used for internal production | ${{ vars.INSTANCE_ID }} |" >> $GITHUB_STEP_SUMMARY
+          echo " " >> $GITHUB_STEP_SUMMARY
+

@@ -1,0 +1,235 @@
+name: 'Build OL8 OVA'
+
+description: 'Build an OL8 OVA'
+
+inputs:
+  release-tag:
+    description: 'A release tag'
+    required: true
+    type: string
+  cloudbolt-action-helper-pem:
+    description: 'Pem for the GitHub App that we use as a helper'
+    required: true
+    type: string
+  ksm-config:
+    description: 'KSM configuration'
+    required: true
+    type: string
+
+runs:
+  using: "composite"
+  steps:
+    - name: Add /usr/local/bin to PATH
+      shell: bash
+      run: echo "/usr/local/bin" >> $GITHUB_PATH
+
+    - name: Generate token
+      id: generate-token
+      uses: tibdex/github-app-token@v1.8.0
+      with:
+        app_id: 175452
+        private_key: ${{ inputs.cloudbolt-action-helper-pem }}
+
+    - name: Install libnsl
+      shell: bash
+      run: sudo dnf install --assumeyes libnsl
+
+    - name: Install GOVC CLI
+      shell: bash
+      run: |
+        curl -L -o govc.tar.gz https://github.com/vmware/govmomi/releases/download/v0.33.0/govc_Linux_x86_64.tar.gz
+        tar -xzf govc.tar.gz -C /tmp/
+        chmod +x /tmp/govc
+        sudo mv /tmp/govc /usr/local/bin/
+
+    - name: Set Environment Variables
+      uses: ./.github/actions/set-vcenter-environment-vars-by-environment
+      with:
+        varFilePath: ./.github/variables/cbsw.io.env
+
+    - name: Retrieve secrets from Keeper
+      id: ksecrets
+      uses: Keeper-Security/ksm-action@v1.0.8
+      with:
+        keeper-secret-config: ${{ inputs.ksm-config }}
+        secrets: |
+            tIMQtRmKrd75wXq0sm8sgg/field/password > env:VCENTER_PACKER_PASSWORD
+            tIMQtRmKrd75wXq0sm8sgg/field/login > env:VCENTER_PACKER_USER
+            ${{ env.VCENTER_SERVER_KEEPER_ID }}/custom_field/server_fqdn > env:VCENTER_SERVER
+
+    - name: Install OVFTOOL
+      shell: bash
+      run: |
+        aws s3 cp s3://github-actions-dependencies/VMware-ovftool-4.4.1-16812187-lin.x86_64.bundle ovftool.bundle
+        chmod +x ./ovftool.bundle
+        ./ovftool.bundle --console --required --eulas-agreed
+
+    - name: Configure DNS
+      shell: bash
+      run: |
+        echo "search cbsw.io" > /etc/resolv.conf
+        echo "nameserver 10.133.241.11" >> /etc/resolv.conf
+        echo "nameserver 10.133.242.12" >> /etc/resolv.conf
+
+    - name: Make Downloads Directory
+      shell: bash
+      run: mkdir -p ./image_build/downloads
+
+    - name: Get Params.json for Release
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+      run: >
+        cd ./image_build/ &&
+        gh release download
+        ${{ inputs.release-tag }}
+        --repo cloudboltsoftware/cloudbolt
+        --pattern '*params*'
+        --dir './downloads'
+
+    - name: Get S3 installer URL
+      shell: bash
+      id: get-url
+      run: cd ./image_build && echo "url=$(jq -r '.cb_installer_url' ./downloads/*.json)" >> $GITHUB_OUTPUT
+
+    - name: Create Http Directory for installer
+      shell: bash
+      run: mkdir -p ./image_build/http
+
+    - name: Download Installer
+      shell: bash
+      run: |
+        aws s3 cp ${{ steps.get-url.outputs.url }} ./image_build/http/installer.tgz
+
+    - name: Get vCenter datastore
+      id: get-dstore
+      shell: bash
+      env:
+        GOVC_URL: ${{ env.VCENTER_SERVER }}
+        GOVC_USERNAME: ${{ env.VCENTER_PACKER_USER }}
+        GOVC_PASSWORD: ${{ env.VCENTER_PACKER_PASSWORD }}
+        GOVC_INSECURE: true
+      run: |
+        # Find the datastore with the name starting with "Nimble" having the most free space
+        echo "vcenter_datastore='Nimble-DS6'" >> $GITHUB_OUTPUT
+
+    - name: Packer Init
+      shell: bash
+      run: |
+        cd ./image_build
+        packer init ./clouds/vmware-oracle-linux-8.pkr.hcl
+        
+    - name: Install xorriso
+      shell: bash
+      run: |
+        dnf install -y xorriso
+
+    - name: Format Tag as Version
+      id: format-tag-as-version
+      uses: ./.github/actions/strip-version-action
+      with:
+        version: ${{ inputs.release-tag }}
+
+    - name: Packer Build
+      shell: bash
+      env:
+        TAG: ${{ inputs.release-tag }}
+        VCENTER_DATASTORE: ${{ steps.get-dstore.outputs.vcenter_datastore }}
+      run: >
+        cd ./image_build &&
+        packer build
+        -force
+        --var='cb_version=${{ steps.format-tag-as-version.outputs.version }}'
+        --var='cluster=${{ env.VCENTER_CLUSTER }}'
+        --var='datacenter=${{ env.VCENTER_DATACENTER }}'
+        --var='datastore=${{ env.VCENTER_DATASTORE }}'
+        --var='destination_folder=${{ env.VCENTER_DESTINATION_FOLDER }}'
+        --var='destination_template_name=CloudBolt_Oracle_Linux_8_${{ env.TAG }}'
+        --var='iso_path=[${{ env.VCENTER_ISO_DATASTORE}}] OracleLinux-R8-U6-x86_64-dvd.iso'
+        --var='network=${{ env.VCENTER_NETWORK }}'
+        --var='os=ol'
+        --var='ssh_password=packer'
+        --var='ssh_username=packer'
+        --var='vcenter_password=${{ env.VCENTER_PACKER_PASSWORD }}'
+        --var='vcenter_server=${{ env.VCENTER_SERVER }}'
+        --var='vcenter_username=${{ env.VCENTER_PACKER_USER }}'
+        ./clouds/vmware-oracle-linux-8.pkr.hcl
+
+    - name: Create Directory for VMware OVA
+      shell: bash
+      run: mkdir -p ./image_build/vmware/ol
+
+    - name: Convert OVF to OVA
+      shell: bash
+      env:
+        TAG: ${{ inputs.release-tag }}
+      run: >
+        cd ./image_build/ &&
+        ovftool
+        --X:logLevel=verbose
+        --allowExtraConfig
+        --targetType=ova
+        --diskMode=thin
+        ./vmware/CloudBolt_Oracle_Linux_8_${{ env.TAG }}.ovf
+        ./vmware/ol/CloudBolt_Oracle_Linux_8_${{ env.TAG }}.ova
+
+    - name: Upload OVA to S3 Bucket
+      shell: bash
+      env:
+        TAG: ${{ inputs.release-tag }}
+      run: >
+        cd ./image_build/ &&
+        aws s3 cp
+        ./vmware/ol/CloudBolt_Oracle_Linux_8_${{ env.TAG }}.ova
+        s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/CloudBolt_Oracle_Linux_8_${{ env.TAG }}.ova
+        --endpoint-url http://s3-accelerate.amazonaws.com
+
+    - name: Upload Metadata
+      shell: bash
+      continue-on-error: true
+      env:
+        TAG: ${{ inputs.release-tag }}
+      run: |
+        cd ./image_build/
+        aws s3 cp ./manifest.json s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/manifest_CloudBolt_Oracle_Linux_8_${{ env.TAG }}.json
+        aws s3 cp ./CloudBolt_Oracle_Linux_8_${{ env.TAG }}_md5.checksum s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/CloudBolt_Oracle_Linux_8_${{ env.TAG }}_md5.checksum
+        aws s3 cp ./CloudBolt_Oracle_Linux_8_${{ env.TAG }}_sha256.checksum s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/CloudBolt_Oracle_Linux_8_${{ env.TAG }}_sha256.checksum
+
+    - name: Create ova_el8.txt artifact
+      id: s3-location
+      shell: bash
+      run: |
+        cd ./image_build/
+        cat manifest.json | jq -r '.builds[0].artifact_id' > ./ova_el8.txt
+        cat manifest.json | jq -r '.builds[0].custom_data.s3_location' > ./s3_location.txt
+        echo "s3-location=$(cat ./s3_location.txt)" >> $GITHUB_OUTPUT
+
+    - name: Generate token
+      id: generate-token-for-upload
+      uses: tibdex/github-app-token@v1.8.0
+      with:
+        app_id: 175452
+        private_key: ${{ inputs.cloudbolt-action-helper-pem }}
+
+    - name: Upload ova_el8.txt to Release
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ steps.generate-token-for-upload.outputs.token }}
+        TAG: ${{ inputs.release-tag }}
+      run: |
+        cd ./image_build/ &&
+        gh release upload \
+        --repo cloudboltsoftware/cloudbolt \
+        ${{ inputs.release-tag }} \
+        ./ova_el8.txt
+
+    - name: Run Workflow Dispatch
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ steps.generate-token-for-upload.outputs.token }}
+      run: >
+        gh workflow run
+        deploy.ova-to-vcenter-content-library.yml
+        --repo CloudBoltSoftware/cloudbolt
+        -f release-tag=${{ inputs.release-tag }}
+        -f ova-prefix=CloudBolt_Oracle_Linux_8_

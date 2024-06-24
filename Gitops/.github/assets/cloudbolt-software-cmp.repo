@@ -1,0 +1,6 @@
+[cloudbolt-software-cmp]
+name=CloudBolt Software
+baseurl=file:///opt/cloudbolt_dnf_repo/
+enabled=1
+gpgcheck=0
+module_hotfixes=true

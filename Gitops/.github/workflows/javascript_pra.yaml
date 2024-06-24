@@ -1,0 +1,62 @@
+name: Javascript PRA
+
+on:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  javascript-pra:
+    name: Javascript PRA
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+    steps:
+      - uses: actions/checkout@v4.1.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Authorize CodeArtifact
+        run: |
+          aws codeartifact login --tool npm --repository cb-npm --domain cloudbolt --domain-owner 499620025628 --region us-east-1
+
+      - name: Prettier
+        run: |
+          npm i -g prettier@2.5.1
+
+      - name: Test static_src
+        working-directory: src/static_src
+        run: |
+          npm ci
+          npm run test
+
+      - name: Test static_src/vue
+        working-directory: src/static_src/vue
+        run: |
+          npm ci
+          npm run coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          working-directory: src/static_src/vue
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Test static_src/vue3
+        working-directory: src/static_src/vue3
+        run: |
+          npm ci
+          npm run coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          working-directory: src/static_src/vue3
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

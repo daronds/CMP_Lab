@@ -1,0 +1,15 @@
+name: 'Placeholder Warning Action'
+description: 'Warns that the workflow is a placeholder and a no-op'
+inputs:
+  workflow_file:
+    description: 'Path to the workflow file to annotate'
+    required: true
+  workflow_name:
+    description: 'Name of the workflow'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - run: echo "::warning file=${{ inputs.workflow_file }}::The workflow '${{ inputs.workflow_name }}' is a placeholder and a no-op."
+      shell: bash
+

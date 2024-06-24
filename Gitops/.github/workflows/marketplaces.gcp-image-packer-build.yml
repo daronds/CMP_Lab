@@ -1,0 +1,79 @@
+name: 005 GCP Image Build
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: true
+
+  workflow_dispatch:
+    # Inputs the workflow accepts.
+    inputs:
+      release_tag:
+        required: true
+jobs:
+  Build:
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Make Downloads Directory
+        working-directory: image_build
+        run: mkdir ./downloads
+
+      - name: Get Params.json for Release
+        working-directory: image_build
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh release download
+          ${{ github.event.inputs.release_tag || inputs.release_tag }} 
+          --repo cloudboltsoftware/cloudbolt 
+          --pattern '*params*'
+          --dir './downloads'
+
+      - name: Get Version
+        working-directory: image_build
+        id: get-version
+        run: echo "version=$(jq -r '.cb_version' ./downloads/*.json)" >> $GITHUB_OUTPUT
+
+      - name: Get S3 installer URL
+        working-directory: image_build
+        id: get-url
+        run: echo "url=$(jq -r '.cb_installer_url' ./downloads/*.json)" >> $GITHUB_OUTPUT
+
+      - name: Create Http Directory for installer
+        working-directory: image_build
+        run: mkdir ./http
+
+      - name: Download Installer
+        working-directory: image_build
+        run: |
+          aws s3 cp --quiet ${{ steps.get-url.outputs.url }} ./http/installer.tgz
+      - name: Save GCP creds
+        working-directory: image_build
+        run: echo '${{ secrets.GCP_PACKER_PROJECT }}' > ./gcp_creds.json
+
+      - name: Packer Init
+        working-directory: image_build
+        run: /usr/bin/packer init ./clouds/gcp.pkr.hcl
+
+      - name: Packer Build
+        working-directory: image_build
+        run: >
+          /usr/bin/packer build
+          -force
+          --var='cb_version=${{ steps.get-version.outputs.version }}'
+          ./clouds/gcp.pkr.hcl

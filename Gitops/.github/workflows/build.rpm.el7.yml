@@ -1,0 +1,179 @@
+name: 002 Build CloudBolt RPM EL7
+# yamllint disable-line rule:truthy
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+        required: true
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  enterprise-linux-7-rpm-builder:
+    name: Build Enterprise Linux 7 RPM
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - m7a-large
+    steps:
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - uses: actions/checkout@v4.1.1
+        with:
+          path: main
+          submodules: "recursive"
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Generate CodeArtifact Auth Token
+        id: generate-codeartifact-token
+        run: |
+          export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain cloudbolt --domain-owner 499620025628 --query authorizationToken --output text)
+          echo "token=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_OUTPUT
+
+      - name: AWS ECR Login
+        run: |
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 499620025628.dkr.ecr.us-east-1.amazonaws.com
+
+      - name: Generate piprequirements.txt
+        working-directory: main/cloudbolt_installer/04-python-pkgs/
+        run: |
+          ./scripts/compile-requirements.sh
+
+      - name: Stop container if already running
+        run: |
+          docker stop cloudbolt-rpm-builder || :
+          docker rm cloudbolt-rpm-builder || :
+
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
+
+      - name: mkdir site-packages
+        run: |
+          mkdir -p ${{ github.workspace }}/site-packages/
+
+      - name: Pip cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-el7-rpm-pip-${{ hashFiles('**/*requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-el7-rpm-pip-
+
+      - name: Pull Latest Docker Image
+        run: >
+          docker pull
+          499620025628.dkr.ecr.us-east-1.amazonaws.com/centos7-rpmbuilder:latest
+
+      - name: Start Container
+        working-directory: main
+        run: >
+          docker run
+          -it
+          -d
+          -e CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN
+          --name cloudbolt-rpm-builder
+          -v $(pwd):/cloudbolt
+          -v ${{ steps.pip-cache.outputs.dir }}:/root/.cache/pip
+          -v ${{ steps.pip-cache.outputs.dir }}:/root/.cache/pip3
+          499620025628.dkr.ecr.us-east-1.amazonaws.com/centos7-rpmbuilder:latest
+          /bin/bash
+
+      - name: Verify Pip Cache dir in Container
+        run: >
+          docker exec cloudbolt-rpm-builder
+          /bin/bash
+          -c "pip3 cache dir"
+
+      - name: Configure Code Artifact
+        run: >
+          docker exec
+          cloudbolt-rpm-builder
+          /bin/bash
+          -c "pip3 install --upgrade pip && pip3 config set global.index-url https://aws:${{ steps.generate-codeartifact-token.outputs.token }}@cloudbolt-499620025628.d.codeartifact.us-east-1.amazonaws.com/pypi/python/simple/"
+
+
+      - name: Install RPM Build Dependencies
+        run: >
+          docker exec
+          --workdir /cloudbolt
+          cloudbolt-rpm-builder
+          /bin/bash
+          -c
+          "dnf builddep -y /cloudbolt/cloudbolt_installer/rpm/rpmbuild/SPECS/cloudbolt.spec"
+
+      - name: Install RPM Build Dependencies
+        run: >
+          docker exec
+          --workdir /cloudbolt
+          cloudbolt-rpm-builder
+          /bin/bash
+          -c
+          "dnf builddep -y /cloudbolt/cloudbolt_installer/rpm/rpmbuild/SPECS/cloudbolt.spec"
+
+      - name: NPM CodeArtifact Setup
+        env:
+          CODEARTIFACT_AUTH_TOKEN: ${{ steps.generate-codeartifact-token.outputs.token }}
+        working-directory: main/cloudbolt_installer/rpm
+        run: |
+          cat npmrc.template | envsubst > .npmrc
+          docker cp .npmrc cloudbolt-rpm-builder:/root/.npmrc
+
+      - name: Split tag on -
+        id: split-tag
+        run: |
+          echo "version=$( echo '${{ inputs.release_tag }}' | cut -d '-' -f1 )" >> $GITHUB_OUTPUT
+          echo "release=$( echo '${{ inputs.release_tag }}' | cut -d '-' -f2 )" >> $GITHUB_OUTPUT
+
+      - name: Build RPM
+        working-directory: main
+        run: >
+          docker exec
+          --workdir /cloudbolt
+          cloudbolt-rpm-builder
+          /bin/bash
+          -c
+          "rpmbuild -bb --define '_release_tag ${{ steps.split-tag.outputs.version }}${{ steps.split-tag.outputs.release != '' && '.' }}${{ steps.split-tag.outputs.release }}' --define '_build ${{ steps.split-tag.outputs.release }}' /cloudbolt/cloudbolt_installer/rpm/rpmbuild/SPECS/cloudbolt.spec"
+
+      - name: Download RPM
+        run: |
+          mkdir -p ./tmp/rpms
+          docker cp cloudbolt-rpm-builder:/root/rpmbuild/RPMS/x86_64/ ./tmp/rpms/
+
+      - name: Upload RPM to S3
+        continue-on-error: true
+        run: |
+          aws s3 cp ./tmp/rpms s3://cb-internal-cloudbolt-rpms/${{ github.run_id }}/ --recursive
+          find ./tmp/rpms -name "cloudbolt-${{ steps.split-tag.outputs.version }}*.rpm" -print0 \
+          | xargs -0 basename \
+          | xargs -t -I {} bash -c "echo 's3://cb-internal-cloudbolt-rpms/${{ github.run_id }}/{}' >> $GITHUB_STEP_SUMMARY"
+
+      - name: Upload RPM to Release
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          for file in ./tmp/rpms/x86_64/cloudbolt-${{ steps.split-tag.outputs.version }}*.rpm; do
+            echo "Uploading $file to GitHub release ${{ inputs.release_tag }}"
+            gh release upload '${{ inputs.release_tag }}' "$file" --repo cloudboltsoftware/cloudbolt --clobber
+            echo "Deleting $file"
+            rm -f "$file"
+            break # Break after the first file to ensure only one file is processed
+          done

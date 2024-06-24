@@ -1,0 +1,275 @@
+name: Build EL7 OVA
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: A release tag
+        required: false
+      environment:
+        description: The vsphere domain you're building in
+        required: true
+        default: 'cbsw.io'
+  workflow_call:
+    inputs:
+      release_tag:
+        description: A release tag
+        required: true
+        type: string
+      environment:
+        description: The vsphere domain you're building in
+        default: 'cbsw.io'
+        type: string
+    secrets:
+      SLACK_DEVOPS_GITHUB_ACTION_ALERTS_WEBHOOK:
+        description: |
+          Slack Token used to post to the devops-github-action-alerts slack channel
+        required: true
+      CLOUDBOLT_ACTION_HELPER_PEM:
+        description: Pem for the GitHub App that we use as a helper
+        required: true
+      KSM_CONFIG:
+        description: KSM configuration
+        required: true
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  Build-OVA:
+    name: Build VM Template and Export to s3://cb-internal-builds as OVA
+    permissions: write-all
+    environment: ${{ inputs.environment || github.event.inputs.environment }}
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    steps:
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+        with:
+          ref: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Set Environment Variables
+        uses: ./.github/actions/set-vcenter-environment-vars-by-environment
+        with:   
+          varFilePath: ./.github/variables/cbsw.io.env
+
+      - name: Install GOVC CLI
+        working-directory: image_build
+        run: |
+          curl -L -o govc.tar.gz https://github.com/vmware/govmomi/releases/download/v0.33.0/govc_Linux_x86_64.tar.gz
+          tar -xzf govc.tar.gz -C /tmp/
+          chmod +x /tmp/govc
+          sudo mv /tmp/govc /usr/local/bin/
+
+      - name: Update keeper
+        run: |
+          pip3 install --upgrade pip
+          pip3 install --upgrade keepercommander
+
+      - name: Retrieve secrets from Keeper
+        id: ksecrets
+        uses: Keeper-Security/ksm-action@v1.0.4
+        with:
+          keeper-secret-config: ${{ secrets.KSM_CONFIG }}
+          secrets: |
+              tIMQtRmKrd75wXq0sm8sgg/field/password > env:VCENTER_PACKER_PASSWORD
+              tIMQtRmKrd75wXq0sm8sgg/field/login > env:VCENTER_PACKER_USER
+              ${{ env.VCENTER_SERVER_KEEPER_ID }}/custom_field/server_fqdn > env:VCENTER_SERVER
+
+      # libnsl is required for ovftool
+      - name: Install libnsl
+        run: sudo dnf install --assumeyes libnsl
+        
+      - name: Install OVFTOOL 
+        run: |
+          aws s3 cp s3://github-actions-dependencies/VMware-ovftool-4.4.1-16812187-lin.x86_64.bundle ovftool.bundle
+          chmod +x ./ovftool.bundle
+          ./ovftool.bundle --console --required --eulas-agreed
+
+      - name: Configure DNS
+        run: |
+          echo "search cbsw.io" > /etc/resolv.conf
+          echo "nameserver 10.133.241.11" >> /etc/resolv.conf
+          echo "nameserver 10.133.242.12" >> /etc/resolv.conf
+
+      - name: Make Downloads Directory
+        working-directory: image_build
+        run: mkdir ./downloads
+
+      - name: Get Params.json for Release
+        working-directory: image_build
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh release download
+          ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }} 
+          --repo cloudboltsoftware/cloudbolt 
+          --pattern '*params*'
+          --dir './downloads'
+
+      - name: Get S3 installer URL
+        working-directory: image_build
+        id: get-url
+        run: echo "url=$(jq -r '.cb_installer_url' ./downloads/*.json)" >> $GITHUB_OUTPUT
+
+      - name: Create Http Directory for installer
+        working-directory: image_build
+        continue-on-error: true
+        run: mkdir -p ./http
+
+      - name: Download Installer
+        working-directory: image_build
+        run: |
+          aws s3 cp --quiet ${{ steps.get-url.outputs.url }} ./http/installer.tgz
+
+      - name: Get vCenter datastore
+        id: get-dstore
+        env:
+          GOVC_URL: ${{ env.VCENTER_SERVER }}
+          GOVC_USERNAME: ${{ env.VCENTER_PACKER_USER }}
+          GOVC_PASSWORD: ${{ env.VCENTER_PACKER_PASSWORD }}
+          GOVC_INSECURE: true
+        run: |
+          echo "vcenter_datastore=Nimble-DS6" >> $GITHUB_OUTPUT
+
+
+      - name: Packer Init
+        working-directory: image_build
+        run: |
+          packer init ./clouds/vmware-centos-7.pkr.hcl
+
+      - name: Format Tag as Version
+        id: format-tag-as-version
+        uses: ./.github/actions/strip-version-action
+        with:
+          version: ${{ inputs.release_tag || github.event.inputs.release_tag || github.ref_name }}
+
+      - name: Packer Build
+        working-directory: image_build
+        env:
+          TAG: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+          VCENTER_DATASTORE: ${{ steps.get-dstore.outputs.vcenter_datastore }}
+        run: >
+          packer build
+          -force
+          --var='cb_version=${{ steps.format-tag-as-version.outputs.version }}'
+          --var='cluster=${{ env.VCENTER_CLUSTER }}'
+          --var='datacenter=${{ env.VCENTER_DATACENTER }}'
+          --var='datastore=${{ env.VCENTER_DATASTORE }}'
+          --var='destination_folder=${{ env.VCENTER_DESTINATION_FOLDER }}'
+          --var='destination_template_name=CloudBolt_${{ env.TAG }}'
+          --var='iso_path_centos7=[${{ env.VCENTER_ISO_DATASTORE}}] CentOS-7-x86_64-DVD-2009.iso'
+          --var='network=${{ env.VCENTER_NETWORK }}'
+          --var='os=centos'
+          --var='ssh_password=cloudbolt'
+          --var='ssh_username=root'
+          --var='vcenter_password=${{ env.VCENTER_PACKER_PASSWORD }}'
+          --var='vcenter_server=${{ env.VCENTER_SERVER }}'
+          --var='vcenter_username=${{ env.VCENTER_PACKER_USER }}'
+          ./clouds/vmware-centos-7.pkr.hcl
+
+      - name: Create Directory for VMware OVA
+        working-directory: image_build
+        run: mkdir -p ./vmware/centos
+
+      - name: Convert OVF to OVA
+        working-directory: image_build
+        env:
+          TAG: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+        run: >
+          ovftool
+          --X:logLevel=verbose
+          --allowExtraConfig
+          --targetType=ova
+          --diskMode=thin
+          ./vmware/CloudBolt_${{ env.TAG }}.ovf
+          ./vmware/centos/CloudBolt_${{ env.TAG }}.ova
+
+      - name: Upload OVA to S3 Bucket
+        working-directory: image_build
+        env:
+          TAG: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+        run: >
+          aws s3 cp
+          vmware/centos/CloudBolt_${{ env.TAG }}.ova
+          s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/CloudBolt_${{ env.TAG }}.ova
+          --endpoint-url http://s3-accelerate.amazonaws.com
+
+      - name: Upload Metadata
+        working-directory: image_build
+        continue-on-error: true
+        env:
+          TAG: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+        run: |
+          aws s3 cp ./manifest.json s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/manifest_CloudBolt_${{ env.TAG }}.json
+          aws s3 cp ./CloudBolt_${{ env.TAG }}_md5.checksum s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/CloudBolt_${{ env.TAG }}_md5.checksum
+          aws s3 cp ./CloudBolt_${{ env.TAG }}_sha256.checksum s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/CloudBolt_${{ env.TAG }}_sha256.checksum
+
+      - name: Create ova.txt artifact
+        working-directory: image_build
+        id: s3-location
+        run: |
+          cat manifest.json | jq -r '.builds[0].artifact_id' > ./ova.txt
+          cat manifest.json | jq -r '.builds[0].custom_data.s3_location' > ./s3_location.txt
+          echo "s3-location=$(cat ./s3_location.txt)" >> $GITHUB_OUTPUT
+
+      - name: Generate token
+        id: generate-token-for-upload
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Upload ova.txt to Release
+        working-directory: image_build
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token-for-upload.outputs.token }}
+          TAG: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+        run: >
+          gh release upload
+          --repo cloudboltsoftware/cloudbolt
+          ${{ env.TAG }}
+          ./ova.txt
+
+  deploy-to-vcenter-content-library:
+    name: Deploy to vCenter Content Library
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    needs:
+      - Build-OVA
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+
+      - name: Run Workflow Dispatch
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh workflow run
+          deploy.ova-to-vcenter-content-library.yml
+          -f release-tag=${{ github.event.inputs.release_tag || inputs.release_tag }}
+          -f ova-prefix=CloudBolt_

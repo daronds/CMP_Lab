@@ -1,0 +1,66 @@
+name: Increment Prerelease
+on:
+  workflow_call:
+    outputs:
+      release_tag:
+        value: ${{ jobs.tag.outputs.release_tag }}
+        description: The release tag to use for the pull request analysis
+jobs:
+  tag:
+    name: Increment Tag
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+    outputs:
+      release_tag: ${{ steps.output-new-tag.outputs.new_tag }}
+    steps:
+      - uses: actions/checkout@v4.1.1
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Get latest GA tag
+        id: get-latest-ga-tag
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          LATEST_GA_TAG=$(gh api repos/:owner/:repo/releases --jq '.[] | .tag_name | select(contains("-") | not)' --paginate | sort -V | tail -n 1;)
+          echo "* LATEST_GA_TAG: $LATEST_GA_TAG" >> $GITHUB_STEP_SUMMARY
+          echo "latest_ga_tag=$LATEST_GA_TAG" >> $GITHUB_OUTPUT
+
+      - name: Increment GA
+        id: increment-ga
+        run: |
+          NEW_TAG=$(echo '${{ steps.get-latest-ga-tag.outputs.latest_ga_tag }}' | awk -F'.' '{print $1"."$2"."$3+1}')
+          echo "* NEW_TAG: $NEW_TAG" >> $GITHUB_STEP_SUMMARY
+          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+
+      - name: Output new tag
+        id: output-new-tag
+        run: |
+          echo "new_tag=${{ steps.increment-ga.outputs.new_tag }}" >> $GITHUB_OUTPUT
+
+      - name: Get Latest Public Release GA Tag
+        id: get-latest-public-release-ga-tag
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          PUBLIC_RELEASE_GA_TAG=$(gh release list --exclude-pre-releases --limit 1 | head -n 1 | awk '{print $1}')
+          echo "* PUBLIC_RELEASE_GA_TAG: $PUBLIC_RELEASE_GA_TAG" >> $GITHUB_STEP_SUMMARY
+          echo "public_release_ga_tag=$PUBLIC_RELEASE_GA_TAG" >> $GITHUB_OUTPUT
+
+      - name: Create Pre-Release
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        id: create-pre-release
+        run: >
+          gh release create ${{ steps.output-new-tag.outputs.new_tag }}
+          --title ${{ steps.output-new-tag.outputs.new_tag }}
+          --prerelease
+          --generate-notes
+          --notes-start-tag ${{ steps.get-latest-public-release-ga-tag.outputs.public_release_ga_tag }}

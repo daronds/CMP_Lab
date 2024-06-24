@@ -1,0 +1,83 @@
+name: Setup RC Validation Tests
+on:
+  workflow_call:
+    inputs:
+      ip:
+        type: string
+        description: IP address of the CloudBolt server
+      release-tag:
+        type: string
+        description: The tag of the release to upgrade to
+    outputs:
+      ip_address:
+        description: "The IP address of the server that was upgraded"
+        value: ${{ jobs.rc-validation-tests-setup.outputs.ip_address }}
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  rc-validation-tests-setup:
+    name: RC Validation Test Setup
+    outputs:
+      ip_address: ${{ steps.set-outputs.outputs.ip_address }}
+    environment:
+      name: staging
+      url: 'https://${{ inputs.ip || vars.IP }}'
+    runs-on:
+      - self-hosted
+      - ubuntu
+      - m7a-xlarge
+    steps:
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - uses: actions/checkout@v4.1.1
+
+      - name: Fetch Presigned Upgrader URL
+        id: get-upgrader-url
+        shell:
+          bash -leo pipefail {0}
+        run: |
+          TAG_NUMBER=$(echo '${{ inputs.release-tag }}' | sed s/^v//)
+          PRESIGNED_URL="$(./.github/assets/fetch_cmp_upgrader_link.sh \
+          --type GA \
+          --number $TAG_NUMBER \
+          --version $TAG_NUMBER \
+          --presigned)"
+          echo "url=$PRESIGNED_URL" >> $GITHUB_OUTPUT
+          echo "Presigned URL: $PRESIGNED_URL"
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Upgrade CMP Instance
+        uses: CloudBoltSoftware/upgrade-cmp-action@v1.0.4
+        with:
+          ip-address: ${{ inputs.ip || vars.IP }}
+          ssh-key: ${{ secrets.SSH_KEY }}
+          ssh-user: ${{ vars.SSH_USER }}
+          upgrader-url: ${{ steps.get-upgrader-url.outputs.url }}
+
+      - name: Wait for CMP to be ready
+        uses: CloudBoltSoftware/wait-for-cmp-readiness-action@v1.1.0
+        with:
+          ip: ${{ inputs.ip || vars.IP }}
+          protocol: https
+          timeout: 300
+
+      - name: Set Outputs
+        id: set-outputs
+        run: |
+          echo "instance_id=${{ vars.INSTANCE_ID }}" >> $GITHUB_OUTPUT
+          echo "ip_address=${{ inputs.ip || vars.IP }}" >> $GITHUB_OUTPUT
+          echo "| Key | Description| Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| ip | IP address of the CloudBolt server used for automated tests | ${{ inputs.ip || vars.IP }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ec2-instance | EC2 instance ID of the CloudBolt server used for automated tests | ${{ vars.INSTANCE_ID }} |" >> $GITHUB_STEP_SUMMARY
+          echo " " >> $GITHUB_STEP_SUMMARY
