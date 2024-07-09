@@ -1,0 +1,81 @@
+name: 002 Build CloudBolt RPM
+# yamllint disable-line rule:truthy
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+        required: true
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  test-rpm:
+    name: Test ${{ matrix.base-image }} 8 RPM Install
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    strategy:
+      fail-fast: false
+      matrix:
+        base-image:
+          - rockylinux8
+          - oraclelinux8
+          - rhel8
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.base-image }}-rpm
+
+      - name: Display structure of downloaded files
+        run: ls -R
+
+      - name: Generate CodeArtifact Auth Token
+        id: generate-codeartifact-token
+        run: >
+          export CODEARTIFACT_AUTH_TOKEN=$(
+          aws codeartifact get-authorization-token
+          --domain cloudbolt --domain-owner 499620025628
+          --query authorizationToken --output text
+          )
+          && echo "token=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_OUTPUT
+
+      - name: AWS ECR Login
+        run: |
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 499620025628.dkr.ecr.us-east-1.amazonaws.com
+
+      - name: Start Container
+        env:
+          RHEL_PASSWORD: ${{ secrets.RHEL_PASSWORD }}
+          RHEL_USERNAME: ${{ secrets.RHEL_USERNAME }}
+        run: >
+          docker run
+          -it
+          -d
+          -e RHEL_USERNAME=$RHEL_USERNAME
+          -e RHEL_PASSWORD=$RHEL_PASSWORD
+          --name cloudbolt-rpm-builder
+          499620025628.dkr.ecr.us-east-1.amazonaws.com/${{ matrix.base-image }}-rpmbuilder:latest
+          /bin/bash
+
+      - name: Copy rpm to container
+        run: |
+          docker exec cloudbolt-rpm-builder /bin/bash -c "mkdir -p /root/rpmbuild/RPMS/x86_64/"
+          docker cp ./x86_64/cloudbolt-*.rpm cloudbolt-rpm-builder:/root/rpmbuild/RPMS/x86_64/   
+
+      - name: Test Install
+        run: |
+          docker exec \
+          cloudbolt-rpm-builder \
+          /bin/bash \
+          -c "dnf localinstall -y /root/rpmbuild/RPMS/x86_64/cloudbolt-*.rpm"

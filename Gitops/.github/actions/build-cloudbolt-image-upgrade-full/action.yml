@@ -1,0 +1,86 @@
+name: Upgrade CloudBolt Image Full
+description: Build full cloudbolt image with apache and systemd
+inputs:
+  upgrader-url:
+    required: true
+    default: https://downloads.cloudbolt.io/9.4.6.1/cloudbolt_upgrader_v9.4.6.1_5f8c2ac.tgz
+  base-version-image:
+    required: true
+    default: 499620025628.dkr.ecr.us-east-1.amazonaws.com/cloudbolt:v9.4.6.1
+  version:
+    default: 9.4.7
+    required: true
+  short_sha:
+    required: true
+outputs:
+  image-tag:
+    value: ${{ steps.image-tag.outputs.image-tag }}
+runs:
+  using: "composite"
+  steps:
+    - name: Add /usr/local/bin to PATH
+      shell: bash -leo pipefail {0}
+      run: |
+        echo "/usr/local/bin" >> $GITHUB_PATH
+
+    - name: ECR Login
+      shell: bash -leo pipefail {0}
+      run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 499620025628.dkr.ecr.us-east-1.amazonaws.com
+
+    - name: Download Installer
+      shell: bash -leo pipefail {0}
+      run: |
+        # if inputs.install-url contains https then curl file else s3 copy
+        if [[ ${{ inputs.upgrader-url }} == *"https"* ]]; then
+          curl -L '${{inputs.upgrader-url}}' -o '${{ github.workspace }}/image_build/containers/upgrader.tgz'
+        else
+          aws s3 cp --quiet '${{ inputs.upgrader-url }}' '${{ github.workspace }}/image_build/containers/upgrader.tgz'
+        fi
+
+    - name: Start Container
+      shell: bash -leo pipefail {0}
+      run: |
+        docker rm -f cloudbolt_build || true
+        docker run --name cloudbolt_build --privileged -v /sys/fs/cgroup:/sys/fs/cgroup:ro -d -i -t ${{ inputs.base-version-image }} /usr/sbin/init
+
+    - name: Copy Upgrader to container
+      shell: bash -leo pipefail {0}
+      run: |
+        docker cp ${{ github.workspace }}/image_build/containers/upgrader.tgz cloudbolt_build:/tmp/upgrader.tgz
+
+    - name: Install Sudo
+      shell: bash -leo pipefail {0}
+      run: docker exec --privileged cloudbolt_build /bin/bash -c "yum install -y sudo"
+
+    - name: Install CloudBolt
+      shell: bash -leo pipefail {0}
+      run: |
+        docker exec --privileged cloudbolt_build /bin/bash -c 'tar xzf /tmp/upgrader.tgz && cd /tmp/cloudbolt_upgrader_*/  && bash -x ./upgrade_cloudbolt.sh force'
+
+    - name: Output Logs
+      shell: bash -leo pipefail {0}
+      if: ${{ failure() }}
+      run: |
+        docker exec --privileged cloudbolt_build /bin/bash -c 'cat /var/log/cloudbolt/install/upgrade_*.log'
+
+    - name: Docker Commit (SystemD workaround)
+      shell: bash -leo pipefail {0}
+      run: docker commit cloudbolt_build ${{ inputs.base-version-image }}.to.${{ inputs.version}}${{ inputs.short_sha }}
+    
+    - name: Docker Tag
+      shell: bash -leo pipefail {0}
+      run: docker push ${{ inputs.base-version-image }}.to.${{ inputs.version}}${{ inputs.short_sha }}
+    
+    - name: Delete Upgrader
+      shell: bash -leo pipefail {0}
+      run: rm ${{ github.workspace }}/image_build/containers/upgrader.tgz
+
+    - name: Delete Image
+      shell: bash -leo pipefail {0}
+      run: docker rmi ${{ inputs.base-version-image }}.to.${{ inputs.version}}${{ inputs.short_sha }}
+
+    - name: Output Image Tag
+      id: image-tag
+      shell: bash -leo pipefail {0}
+      run: echo '::set-output name=image-tag::${{ inputs.base-version-image }}.to.${{ inputs.version}}${{inputs.short_sha}}'
+

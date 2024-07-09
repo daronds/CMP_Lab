@@ -1,0 +1,303 @@
+name: Build CloudBolt Oracle Linux 8 OVA QEMU
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: A release tag
+        required: false
+        default: v2022.3.1
+      environment:
+        description: The vsphere domain you're building in
+        required: true
+        default: 'cbsw.io'
+  workflow_call:
+    inputs:
+      release_tag:
+        description: A release tag
+        required: true
+        type: string
+      environment:
+        description: The vsphere domain you're building in
+        default: 'cbsw.io'
+        type: string
+    secrets:
+      SLACK_DEVOPS_GITHUB_ACTION_ALERTS_WEBHOOK:
+        description: |
+          Slack Token used to post to the devops-github-action-alerts slack channel
+        required: true
+      CLOUDBOLT_ACTION_HELPER_PEM:
+        description: Pem for the GitHub App that we use as a helper
+        required: true
+      KSM_CONFIG:
+        description: KSM configuration
+        required: true
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  Build-OVA:
+    name: Build VM Template and Export to s3://cb-internal-builds as OVA
+    permissions: write-all
+    environment: ${{ inputs.environment || github.event.inputs.environment }}
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    steps:
+      - name: Add /usr/local/bin to PATH
+        run: echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Install libnsl
+        run: sudo dnf install --assumeyes libnsl
+
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+      
+      - name: Install GOVC CLI
+        working-directory: image_build
+        run: |
+          curl -L -o govc.tar.gz https://github.com/vmware/govmomi/releases/download/v0.33.0/govc_Linux_x86_64.tar.gz
+          tar -xzf govc.tar.gz -C /tmp/
+          chmod +x /tmp/govc
+          sudo mv /tmp/govc /usr/local/bin/
+
+      - name: Set Environment Variables
+        uses: ./.github/actions/set-vcenter-environment-vars-by-environment
+        with:   
+          varFilePath: ./.github/variables/cbsw.io.env
+
+      - name: Retrieve secrets from Keeper
+        id: ksecrets
+        uses: Keeper-Security/ksm-action@v1.0.2
+        with:
+          keeper-secret-config: ${{ secrets.KSM_CONFIG }}
+          secrets: |
+              tIMQtRmKrd75wXq0sm8sgg/field/password > env:VCENTER_PACKER_PASSWORD
+              tIMQtRmKrd75wXq0sm8sgg/field/login > env:VCENTER_PACKER_USER
+              ${{ env.VCENTER_SERVER_KEEPER_ID }}/custom_field/server_fqdn > env:VCENTER_SERVER
+
+      - name: Install OVFTOOL 
+        run: |
+          aws s3 cp s3://github-actions-dependencies/VMware-ovftool-4.4.1-16812187-lin.x86_64.bundle ovftool.bundle
+          chmod +x ./ovftool.bundle
+          ./ovftool.bundle --console --required --eulas-agreed
+
+      - name: Configure DNS
+        run: |
+          echo "search cbsw.io" > /etc/resolv.conf
+          echo "nameserver 10.133.241.11" >> /etc/resolv.conf
+          echo "nameserver 10.133.242.12" >> /etc/resolv.conf
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Make Downloads Directory
+        working-directory: image_build
+        run: mkdir ./downloads
+
+      - name: Get Params.json for Release
+        working-directory: image_build
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh release download
+          ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }} 
+          --repo cloudboltsoftware/cloudbolt 
+          --pattern '*params*'
+          --dir './downloads'
+
+      - name: Get S3 installer URL
+        working-directory: image_build
+        id: get-url
+        run: echo "url=$(jq -r '.cb_installer_url' ./downloads/*.json)" >> $GITHUB_OUTPUT
+
+      - name: Create Http Directory for installer
+        working-directory: image_build
+        run: mkdir -p ./http
+
+      - name: Download Installer
+        working-directory: image_build
+        run: |
+          aws s3 cp ${{ steps.get-url.outputs.url }} ./http/installer.tgz
+
+      - name: Get vCenter datastore
+        id: get-dstore
+        env:
+          GOVC_URL: ${{ env.VCENTER_SERVER }}
+          GOVC_USERNAME: ${{ env.VCENTER_PACKER_USER }}
+          GOVC_PASSWORD: ${{ env.VCENTER_PACKER_PASSWORD }}
+          GOVC_INSECURE: true
+        run: |
+          # Find the datastore with the name starting with "Nimble" having the most free space
+          echo "vcenter_datastore='Nimble-DS6'" >> $GITHUB_OUTPUT
+
+      - name: Packer Init
+        working-directory: image_build
+        run: |
+          packer init ./clouds/vmware-oracle-linux-8-qemu.pkr.hcl
+          
+      - name: Install xorriso
+        working-directory: image_build
+        run: |
+          dnf install -y xorriso
+
+      - name: Format Tag as Version
+        id: format-tag-as-version
+        uses: ./.github/actions/strip-version-action
+        with:
+          version: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+
+      - name: install qemu
+        run: |
+          sudo dnf install -y https://yum.oracle.com/repo/OracleLinux/OL8/appstream/x86_64/getPackage/libpmem-1.12.1-1.module+el8.8.0+20971+92b0ed72.x86_64.rpm
+          sudo dnf module install virt -y
+          sudo dnf install -y @virt
+          which -a qemu-kvm || :
+          sudo find / -name "qemu-kvm"
+
+      - name: Install kvm
+        run: >
+          sudo dnf install -y 
+          libguestfs-tools 
+          libvirt
+          libvirt-client 
+          libvirt-daemon-driver-qemu 
+          libvirt-daemon-driver-storage 
+          libvirt-daemon-driver-storage-core 
+          libvirt-daemon-driver-storage-disk 
+          libvirt-daemon-driver-storage-gluster 
+          libvirt-daemon-driver-storage-iscsi 
+          libvirt-daemon-driver-storage-iscsi-direct 
+          libvirt-daemon-driver-storage-logical 
+          libvirt-daemon-driver-storage-mpath 
+          libvirt-daemon-driver-storage-rbd 
+          libvirt-daemon-driver-storage-scsi 
+          libvirt-daemon-kvm 
+          libvirt-devel 
+          libvirt-libs 
+          libvirt-python3 
+          python3-libvirt 
+          qemu-img 
+          qemu-kvm 
+          virt-install 
+          virt-manager 
+          virt-top 
+
+
+      - name: Start Libvirtd service
+        run: |
+          sudo systemctl start libvirtd
+          sudo systemctl enable libvirtd
+          sudo systemctl status libvirtd
+
+
+      - name: Packer Build
+        working-directory: image_build
+        env:
+          TAG: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+          VCENTER_DATASTORE: ${{ steps.get-dstore.outputs.vcenter_datastore }}
+          PACKER_LOG: 1
+        run: >
+          packer build
+          -force
+          --var='cb_version=${{ steps.format-tag-as-version.outputs.version }}'
+          --var='ssh_password=packer'
+          --var='ssh_username=packer'
+          ./clouds/vmware-oracle-linux-8-qemu.pkr.hcl
+
+      - name: Create Directory for VMware OVA
+        working-directory: image_build
+        run: mkdir -p ./vmware/ol
+
+      - name: Convert OVF to OVA
+        working-directory: image_build
+        env:
+          TAG: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+        run: >
+          ovftool
+          --X:logLevel=verbose
+          --allowExtraConfig
+          --targetType=ova
+          --diskMode=thin
+          --compress=9
+          ./vmware/CloudBolt_Oracle_Linux_8_${{ env.TAG }}.ovf
+          ./vmware/ol/CloudBolt_Oracle_Linux_8_${{ env.TAG }}.ova
+
+      - name: Upload OVA to S3 Bucket
+        working-directory: image_build
+        env:
+          TAG: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+        run: >
+          aws s3 cp
+          vmware/ol/${{ env.DESTINATION_TEMPLATE_NAME }}.ova
+          s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/CloudBolt_Oracle_Linux_8_${{ env.TAG }}.ova
+          --endpoint-url http://s3-accelerate.amazonaws.com
+
+      - name: Upload Metadata
+        working-directory: image_build
+        run: |
+          aws s3 cp ./manifest.json s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/manifest_CloudBolt_Oracle_Linux_8_${{ env.TAG }}.json
+          aws s3 cp ./CloudBolt_Oracle_Linux_8_${{ env.TAG }}_md5.checksum s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/CloudBolt_Oracle_Linux_8_${{ env.TAG }}_md5.checksum
+          aws s3 cp ./CloudBolt_Oracle_Linux_8_${{ env.TAG }}_sha256.checksum s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/CloudBolt_Oracle_Linux_8_${{ env.TAG }}_sha256.checksum
+
+      - name: Create ova_el8.txt artifact
+        working-directory: image_build
+        id: s3-location
+        run: |
+          cat manifest.json | jq -r '.builds[0].artifact_id' > ./ova_el8.txt
+          cat manifest.json | jq -r '.builds[0].custom_data.s3_location' > ./s3_location.txt
+          echo "s3-location=$(cat ./s3_location.txt)" >> $GITHUB_OUTPUT
+
+      - name: Generate token
+        id: generate-token-for-upload
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Upload ova_el8.txt to Release
+        working-directory: image_build
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token-for-upload.outputs.token }}
+          TAG: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+        run: >
+          gh release upload
+          --repo cloudboltsoftware/cloudbolt
+          ${{ env.TAG }}
+          ./ova_el8.txt
+
+
+      - name: Add OVA to vCenter Content Library with govc
+        working-directory: image_build
+        env:
+          GOVC_URL: ${{ env.VCENTER_SERVER }}
+          GOVC_USERNAME: ${{ env.VCENTER_PACKER_USER }}
+          GOVC_PASSWORD: ${{ env.VCENTER_PACKER_PASSWORD }}
+          GOVC_INSECURE: true
+          TAG: ${{ github.event.inputs.release_tag || inputs.release_tag || github.ref_name }}
+        run: |
+          OVA_FILE="./vmware/ol/CloudBolt_Oracle_Linux_8_${TAG}.ova"
+          CONTENT_LIBRARY_NAME="${{ env.VCENTER_CONTENT_LIBRARY }}"
+          ITEM_NAME="CloudBolt_Oracle_Linux_8_${TAG}"
+          # Check if the OVA file exists
+          if [ ! -f "$OVA_FILE" ]; then
+            echo "OVA file does not exist: $OVA_FILE"
+            exit 1
+          fi
+
+          # Upload OVA to Content Library
+          echo "Uploading $OVA_FILE to Content Library $CONTENT_LIBRARY_NAME"
+          govc library.import -k -c $CONTENT_LIBRARY_NAME -n $ITEM_NAME $OVA_FILE

@@ -1,0 +1,312 @@
+name: Build and Smoke Test
+on:
+  pull_request:
+permissions: write-all
+jobs:
+  tag:
+    name: Auto Increment Tag
+    uses: ./.github/workflows/tag.increment-pr.yml
+    secrets: inherit
+    concurrency:
+      group: tag-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: false
+  build-gulp:
+    name: Build Gulp
+    uses: ./.github/workflows/build.gulp.yml
+    secrets: inherit
+  build-cmp-setup-ui:
+    name: Build CMP Setup UI
+    uses: ./.github/workflows/build.cmp-setup-ui.yml
+    secrets: inherit
+  build-cmp-vue:
+    name: Build CMP Vue
+    uses: ./.github/workflows/build.cmp-vue.yml
+    secrets: inherit
+  build-cmp-vue-3:
+    name: Build CMP Vue 3
+    uses: ./.github/workflows/build.cmp-vue-3.yml
+    secrets: inherit
+  build-generate-artifact-names:
+    name: Generate Artifact Names
+    uses: ./.github/workflows/build.generate-artifact-names.yml
+    secrets: inherit
+  build-postgresql-snapshot:
+    name: Build PostgreSQL Snapshot
+    uses: ./.github/workflows/build.postgresql-snapshot.yml
+    secrets: inherit
+    with:
+      postgres: ${{ needs.build-generate-artifact-names.outputs.postgres }}
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+    needs:
+      - build-generate-artifact-names
+      - tag
+  build-el8-rpm:
+    uses: ./.github/workflows/build.rpm.el8.yml
+    with:
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+    secrets: inherit
+    needs: tag
+    concurrency:
+      group: build-el8-rpm-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: false
+  build-el7-rpm:
+    uses: ./.github/workflows/build.rpm.el7.yml
+    with:
+      release_tag: ${{ needs.tag.outputs.release_tag || github.sha }}
+    secrets: inherit
+    needs: tag
+    concurrency:
+      group: build-el7-rpm-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: false
+  build-local-dnf-repos:
+    name: Build airgapped DNF repos
+    uses: ./.github/workflows/build.rpm.create-local-repo.yml
+    with:
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+    secrets: inherit
+    needs:
+      - tag
+    concurrency:
+      group: build-local-dnf-repos-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
+  build-upgrader-and-installer:
+    name: Build Installer
+    uses: ./.github/workflows/build.installer.yml
+    with:
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+      make-cmp-setup-ui-distro-package-path: ${{ needs.build-cmp-setup-ui.outputs.path }}
+      postgres-ss-s3-location-latest: ${{ needs.build-postgresql-snapshot.outputs.postgres-ss-s3-location-latest }}
+      postgres-ss-s3-location: ${{ needs.build-postgresql-snapshot.outputs.postgres-ss-s3-location }}
+      short_sha: ${{ needs.build-generate-artifact-names.outputs.short_sha }}
+      minimal_repo_artifact: ${{ needs.build-local-dnf-repos.outputs.minimal_repo_artifact }}
+    secrets: inherit
+    needs:
+      - tag
+      - build-el8-rpm
+      - build-el7-rpm
+      - build-local-dnf-repos
+      - build-cmp-setup-ui
+      - build-cmp-vue
+      - build-cmp-vue-3
+      - build-postgresql-snapshot
+      - build-generate-artifact-names
+      - build-gulp
+  smoke-test:
+    name: Smoke Test
+    needs:
+      - tag
+      - build-upgrader-and-installer
+    uses: ./.github/workflows/smoke-test.yml
+    with:
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+      upgrader_presigned_url: ${{ needs.build-upgrader-and-installer.outputs.upgrader_presigned_url }}
+    secrets: inherit
+  verify-installer:
+    name: Verify CloudBolt Installer
+    runs-on:
+      - self-hosted
+      - ubuntu
+      - large
+
+    environment:
+      name: Smoke Tests
+    needs:
+      - tag
+      - build-upgrader-and-installer
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-skip-session-tagging: true
+
+      - name: Launch CloudBolt-GA EC2 Instance
+        id: launch-ec2-instance
+        uses: CloudBoltSoftware/launch-ec2-template-action@v1.3.2
+        with:
+          launch_template_name: oracle-linux-8
+          aws_region: ${{ vars.AWS_REGION }}
+
+      - name: Install CMP
+        uses: CloudBoltSoftware/install-cmp-action@v1.0.0
+        with:
+          ip-address: ${{ steps.launch-ec2-instance.outputs.ip_address }}
+          ssh-key: ${{ secrets.SSH_KEY }}
+          ssh-user: ${{ vars.SSH_USER }}
+          installer-url: ${{ needs.build-upgrader-and-installer.outputs.installer_presigned_url }}
+
+      - name: Set Outputs
+        run: |
+          echo "| Key | Description | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| ip | IP address of the CloudBolt server used for smoke tests | ${{ steps.launch-ec2-instance.outputs.ip_address }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ec2-instance | EC2 instance ID of the CloudBolt server used for smoke tests | ${{ steps.launch-ec2-instance.outputs.instance_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo " " >> $GITHUB_STEP_SUMMARY
+
+  verify-airgapped-installer:
+    name: Verify CloudBolt Installer with Airgap enabled
+    runs-on:
+      - self-hosted
+      - ubuntu
+      - large
+
+    environment:
+      name: Smoke Tests
+    needs:
+      - tag
+      - build-upgrader-and-installer
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-skip-session-tagging: true
+
+      - name: Launch CloudBolt-GA EC2 Instance
+        id: launch-ec2-instance
+        uses: CloudBoltSoftware/launch-ec2-template-action@v1.3.2
+        with:
+          launch_template_name: oracle-linux-8
+          aws_region: ${{ vars.AWS_REGION }}
+
+      - name: Install CMP
+        uses: CloudBoltSoftware/install-cmp-action@add-airgapped-flag
+        with:
+          ip-address: ${{ steps.launch-ec2-instance.outputs.ip_address }}
+          ssh-key: ${{ secrets.SSH_KEY }}
+          ssh-user: ${{ vars.SSH_USER }}
+          installer-url: ${{ needs.build-upgrader-and-installer.outputs.installer_presigned_url }}
+          airgapped: true
+
+      - name: Set Outputs
+        run: |
+          echo "| Key | Description | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| ip | IP address of the CloudBolt server used for smoke tests | ${{ steps.launch-ec2-instance.outputs.ip_address }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ec2-instance | EC2 instance ID of the CloudBolt server used for smoke tests | ${{ steps.launch-ec2-instance.outputs.instance_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo " " >> $GITHUB_STEP_SUMMARY
+
+  verify-airgapped-rhel-installer:
+    name: Verify RHEL 8 CloudBolt Installer with Airgap enabled
+    runs-on:
+      - self-hosted
+      - ubuntu
+      - large
+
+    environment:
+      name: Smoke Tests
+    needs:
+      - tag
+      - build-upgrader-and-installer
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-skip-session-tagging: true
+
+      - name: Launch CloudBolt-GA EC2 Instance
+        id: launch-ec2-instance
+        uses: CloudBoltSoftware/launch-ec2-template-action@v1.3.2
+        with:
+          launch_template_name: RHEL-8
+          aws_region: ${{ vars.AWS_REGION }}
+
+      - name: Install CMP
+        uses: CloudBoltSoftware/install-cmp-action@add-airgapped-flag
+        with:
+          ip-address: ${{ steps.launch-ec2-instance.outputs.ip_address }}
+          ssh-key: ${{ secrets.SSH_KEY }}
+          ssh-user: ${{ vars.SSH_USER }}
+          installer-url: ${{ needs.build-upgrader-and-installer.outputs.installer_presigned_url }}
+          airgapped: true
+
+      - name: Set Outputs
+        run: |
+          echo "| Key | Description | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| ip | IP address of the CloudBolt server used for smoke tests | ${{ steps.launch-ec2-instance.outputs.ip_address }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ec2-instance | EC2 instance ID of the CloudBolt server used for smoke tests | ${{ steps.launch-ec2-instance.outputs.instance_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo " " >> $GITHUB_STEP_SUMMARY
+
+
+  verify-rhel-installer:
+    name: Verify RHEL 8 CloudBolt Installer
+    runs-on:
+      - self-hosted
+      - ubuntu
+      - large
+
+    environment:
+      name: Smoke Tests
+    needs:
+      - tag
+      - build-upgrader-and-installer
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-skip-session-tagging: true
+
+      - name: Launch CloudBolt-GA EC2 Instance
+        id: launch-ec2-instance
+        uses: CloudBoltSoftware/launch-ec2-template-action@v1.3.2
+        with:
+          launch_template_name: RHEL-8
+          aws_region: ${{ vars.AWS_REGION }}
+
+      - name: Install CMP
+        uses: CloudBoltSoftware/install-cmp-action@v1.0.0
+        with:
+          ip-address: ${{ steps.launch-ec2-instance.outputs.ip_address }}
+          ssh-key: ${{ secrets.SSH_KEY }}
+          ssh-user: ${{ vars.SSH_USER }}
+          installer-url: ${{ needs.build-upgrader-and-installer.outputs.installer_presigned_url }}
+
+      - name: Set Outputs
+        run: |
+          echo "| Key | Description | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| ip | IP address of the CloudBolt server used for smoke tests | ${{ steps.launch-ec2-instance.outputs.ip_address }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ec2-instance | EC2 instance ID of the CloudBolt server used for smoke tests | ${{ steps.launch-ec2-instance.outputs.instance_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo " " >> $GITHUB_STEP_SUMMARY
+
+
+

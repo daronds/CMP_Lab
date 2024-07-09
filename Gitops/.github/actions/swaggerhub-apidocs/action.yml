@@ -1,0 +1,63 @@
+name: Generate Release APIDOCS
+description: Generate API Release Documentation
+inputs:
+  swaggerhub-apikey:
+    description: SwaggerHub API Key
+    required: true
+  swaggerhub-api-path:
+    default: https://api.swaggerhub.com
+    description: SwaggerHub API Path
+    required: true
+  version:
+    description: API Release Version
+    required: true
+  project:
+    description: SwaggerHub project
+    required: true
+  master-api:
+    description: Project Master API
+    required: true
+  public-project:
+    description: SwaggerHub public project
+    required: true
+  public-api:
+    description: Public API containing all of the merged project API's
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create API Docs Directory
+      shell: bash -leo pipefail {0}
+      run: |
+        mkdir -p ./swaggerhub_docs/apidocs/cloudbolt/${{ inputs.version }}/${{ inputs.project }}
+
+    - name: Refresh ECR Token
+      shell: bash -leo pipefail {0}
+      run: |
+        aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 499620025628.dkr.ecr.us-east-1.amazonaws.com
+        aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 499620025628.dkr.ecr.us-east-1.amazonaws.com
+        docker pull 499620025628.dkr.ecr.us-east-1.amazonaws.com/cloudbolt-openapi-spec-cli:9.4.7.1
+        docker tag 499620025628.dkr.ecr.us-east-1.amazonaws.com/cloudbolt-openapi-spec-cli:9.4.7.1 cloudbolt-openapi-spec-cli:latest
+
+    - name: Create API Release Version
+      shell: bash -leo pipefail {0}
+      run: |
+        export SWAGGERHUB_API_BASEURL=${{ inputs.swaggerhub-api-path }}
+        export SWAGGERHUB_API_TOKEN=${{ inputs.swaggerhub-apikey }}
+        echo "Executing python swagger_apidocs_cli.py create-new-version --project=${{ inputs.project }} --new-version=${{ inputs.version }}"
+        docker run -t --rm --env SWAGGERHUB_API_BASEURL --env SWAGGERHUB_API_TOKEN \
+           --workdir /var/opt/swaggerhub_docs \
+           --volume $(pwd)/swaggerhub_docs:/var/opt/swaggerhub_docs \
+           cloudbolt-openapi-spec-cli bash -c "python swagger_apidocs_cli.py create-new-version --project=${{ inputs.project }} --new-version=${{ inputs.version }}"
+
+    - name: Merge/Create API Release Documentation
+      shell: bash -leo pipefail {0}
+      run: |
+        export SWAGGERHUB_API_BASEURL=${{ inputs.swaggerhub-api-path }}
+        export SWAGGERHUB_API_TOKEN=${{ inputs.swaggerhub-apikey }}
+        echo "Executing python swagger_apidocs_cli.py merge-project-apis --project=${{ inputs.project }} --master-api=${{ inputs.master-api }} --api-version=${{ inputs.version }} --apidocs-dir=/var/opt/swaggerhub_docs/apidocs/cloudbolt/${{ inputs.version }} --public-project=${{ inputs.public-project }} --public-api=${{ inputs.public-api }}"
+        docker run -t --rm --env SWAGGERHUB_API_BASEURL --env SWAGGERHUB_API_TOKEN \
+           --workdir /var/opt/swaggerhub_docs \
+           --volume $(pwd)/swaggerhub_docs:/var/opt/swaggerhub_docs \
+           cloudbolt-openapi-spec-cli bash -c "python swagger_apidocs_cli.py merge-project-apis --project=${{ inputs.project }} --master-api=${{ inputs.master-api }} --api-version=${{ inputs.version }} --apidocs-dir=/var/opt/swaggerhub_docs/apidocs/cloudbolt/${{ inputs.version }}/${{ inputs.project }} --public-project=${{ inputs.public-project }} --public-api=${{ inputs.public-api }}"

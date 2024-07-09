@@ -1,0 +1,130 @@
+name: 002 Build CMP Setup UI Artifact
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+    outputs:
+      path:
+        value: ${{ jobs.make-cmp-setup-ui-distro-package.outputs.path }}
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  make-cmp-setup-ui-distro-package:
+    name: Build CMP Setup UI Artifact
+    env:
+      BUCKET: cb-internal-builds
+      DOCS_BUCKET: clickhelp-artifacts
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+
+    steps:
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Authenticate CodeArtifact
+        run: |
+          aws codeartifact login --tool npm --repository cb-npm --domain cloudbolt --domain-owner 499620025628 --region us-east-1
+
+      - uses: actions/checkout@v4.1.1
+        with:
+          path: main
+          submodules: "recursive"
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: "./main/.nvmrc"
+
+      - name: Read Dependencies
+        id: read-deps
+        working-directory: main
+        run: |
+          echo "cmp-ui-v2-version=$(cat ./CMPUIV2_VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Read Build Facts
+        id: read-build-facts
+        working-directory: main
+        run: |
+          echo "branch=${{ inputs.release_tag }}" >> $GITHUB_OUTPUT
+          echo "company=$(cat ./COMPANY)" >> $GITHUB_OUTPUT
+          echo "version=$(cat ./VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Checkout Cmp-ui-v2
+        uses: actions/checkout@v4.1.1
+        with:
+          repository: CloudBoltSoftware/cmp-ui-v2
+          path: cmp-ui-v2
+          ref: ${{ steps.read-deps.outputs.cmp-ui-v2-version }}
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Get CMP UI SHA
+        id: get-cmp-ui-sha
+        working-directory: cmp-ui-v2
+        run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create Build Root
+        working-directory: main/cloudbolt_installer
+        id: create-build-root
+        run: |
+          cd ../../
+          mkdir -p cloudbolt_build/build_temp/installer
+          mkdir -p cloudbolt_build/build_temp/upgrader
+          mkdir -p cloudbolt_build/build_package
+          mkdir -p cloudbolt_build/distro_package
+          cd cloudbolt_build
+          echo "build-root=$(pwd)" >> $GITHUB_OUTPUT
+
+      - name: NPM Cache
+        uses: actions/cache@v4
+        if: ${{ github.run_attempt == 1 }}
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: CMP UI Cache
+        id: cmp-ui-cache
+        if: ${{ github.run_attempt == 1 }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.create-build-root.outputs.build-root }}/cmp_setup_ui/distro_package
+            /tmp/make_cmp_setup_ui_distro_package.out
+          key: ${{ runner.os }}-cmp-ui-${{ steps.get-cmp-ui-sha.outputs.sha }}
+          restore-keys: ${{ runner.os }}-cmp-ui-${{ steps.get-cmp-ui-sha.outputs.sha }}
+
+      - name: Make CMP Setup UI Distro
+        if: steps.cmp-ui-cache.outputs.cache-hit != 'true'
+        working-directory: main/src/dev_tools
+        run: |
+          ./make_cmp_setup_ui_distro_package.sh -b ${{ steps.create-build-root.outputs.build-root }} | tee /tmp/make_cmp_setup_ui_distro_package.out
+
+      - name: Output Distro Package
+        id: output-distro-package
+        run: |
+          echo "cmp_setup_ui_distro_pkg=$(tail -1 /tmp/make_cmp_setup_ui_distro_package.out)" >> $GITHUB_OUTPUT
+
+      - name: Upload CMP Setup UI Distro Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmp_setup_ui_distro_pkg
+          path: ${{ steps.output-distro-package.outputs.cmp_setup_ui_distro_pkg }}
+
+    outputs:
+      path: ${{ steps.output-distro-package.outputs.cmp_setup_ui_distro_pkg }}

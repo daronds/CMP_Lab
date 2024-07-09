@@ -1,0 +1,60 @@
+# To get started with Dependabot version updates, you'll need to specify which
+# package ecosystems to update and where the package manifests are located.
+# Please see the documentation for all configuration options:
+# https://help.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+version: 2
+registries:
+  python-codeartifact:
+    type: python-index
+    url: https://cloudbolt-499620025628.d.codeartifact.us-east-1.amazonaws.com/pypi/python/simple
+    username: aws
+    password: ${{secrets.CODEARTIFACT_PYTHON}}
+  github-poxx:
+    type: git
+    url: https://github.com
+    username: x-access-token
+    password: ${{ secrets.GIT_TOKEN }}
+  npm-npmjs:
+    type: npm-registry
+    url: https://cloudbolt-499620025628.d.codeartifact.us-east-1.amazonaws.com/npm/cb-npm/
+    token: ${{ secrets.CODEARTIFACT_NPM_AUTH_TOKEN }}
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "pip" # See documentation for possible values
+    directory: "/cloudbolt_installer/04-python-pkgs/"
+    registries: "*"
+    insecure-external-code-execution: allow
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "azure-*"
+    labels:
+      - "poetry"
+      - "python"
+    versioning-strategy: increase-if-necessary
+
+  - package-ecosystem: "npm" # See documentation for possible values
+    directory: "/src/static_src/" # Location of package manifests
+    allow:
+      - dependency-type: "production"
+    registries: "*"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 0
+    versioning-strategy: increase-if-necessary
+
+  - package-ecosystem: "npm" # See documentation for possible values
+    directory: "/src/static_src/vue" # Location of package manifests
+    allow:
+      - dependency-type: "production"
+    registries: "*"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 0
+    versioning-strategy: increase-if-necessary

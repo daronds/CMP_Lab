@@ -1,0 +1,184 @@
+name: 002 Unit Tests
+
+on:
+  # push:
+  workflow_call:
+    inputs:
+      full-crypto-flag:
+        description: 'Run all unit tests with full crypto enabled'
+        type: boolean
+        default: false
+        required: false
+
+defaults:
+  run:
+    shell: bash -eo pipefail {0}
+
+# concurrency:
+  # group: unit-tests-${{ github.head_ref }}
+  # cancel-in-progress: true
+
+jobs:
+  pytest-pra:
+    name: Unit Tests
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+    strategy:
+      fail-fast: false
+      matrix:
+        pyapp:
+          - resourcehandlers
+          - accounts
+          - admin_roles
+          - alerts
+          - analytics
+          - api
+          - authentication
+          - behavior_mapping
+          - cb_secrets
+          - cbadmin
+          - cbhooks
+          - common
+          - connectors
+          - containerorchestrators
+          - content_library
+          - costs
+          - cscv
+          - customforms
+          - dashboard
+          - dataprotection
+          - driven_apps
+          - emailtemplates
+          - extensions
+          - externalcontent
+          - features
+          - files
+          - generic_jobs
+          - health_check
+          - history
+          - infrastructure
+          - initialize
+          - ipam
+          - itsm
+          - jobengine
+          - jobs
+          - loadbalancers
+          - network_virtualization
+          - networks
+          - orchestrationengines
+          - orders
+          - portals
+          - product_license
+          - provisionengines
+          - quick_setup
+          - quota
+          - remote
+          - reportengines
+          - resources
+          - siem
+          - servicecatalog
+          - source_code_repos
+          - tabs
+          - tags
+          - tenants
+          - utilities
+          - working_directory
+    steps:
+      - uses: actions/checkout@v4.1.1
+        with:
+          # fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.sha }}
+
+      - name: Add poetry to Path
+        run: |
+          echo "/opt/poetry/bin" >> $GITHUB_PATH
+          echo "/usr/local/bin/" >> $GITHUB_PATH
+
+      - name: Get poetry cache dir
+        id: poetry-cache
+        run: echo "dir=$(poetry config cache-dir)" >> $GITHUB_OUTPUT
+
+      - name: Poetry cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.poetry-cache.outputs.dir }}
+          key: ${{ runner.os }}-el8-poetry-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-el8-poetry-
+#
+      - name: Setup Pip CodeArtifact
+        run: |
+          aws codeartifact login --tool pip --repository python --domain cloudbolt --domain-owner 499620025628 --region us-east-1
+
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
+
+      - name: Pip cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-el8-pip-${{ hashFiles('**/*requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-el8-pip-
+
+      - name: Pip Install
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # It is safe to continue on error here because anything pip misses is picked up by poetry
+          pip install keyring || :
+          pip install -r ./cloudbolt_installer/04-python-pkgs/piprequirements.txt || :
+          pip install -r ./cloudbolt_installer/04-python-pkgs/devrequirements.txt || :
+
+      - name: Poetry Install
+        run: |
+          poetry config --local virtualenvs.create false
+          export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --region us-east-1 --domain cloudbolt --domain-owner 499620025628 --query authorizationToken --output text)
+          poetry config repositories.python https://cloudbolt-499620025628.d.codeartifact.us-east-1.amazonaws.com/pypi/python/simple/
+          poetry config http-basic.python aws $CODEARTIFACT_AUTH_TOKEN
+          poetry config virtualenvs.options.system-site-packages true
+          poetry install --with=dev
+          poetry run pip install ddtrace
+
+      - name: Create Customer Settings
+        run: |
+          mkdir -p ./proserv
+          echo "SECRETS = {}" > ./proserv/customer_settings.py
+
+      - name: Add cloudbolt user and group
+        continue-on-error: true
+        run: |
+          sudo groupadd cloudbolt || :
+          sudo useradd -g cloudbolt cloudbolt || :
+
+      - name: Run Unit Tests
+        env:
+          DD_CIVISIBILITY_AGENTLESS_ENABLED: true
+          DD_API_KEY: ${{ secrets.DD_CI_API_KEY }}
+          DD_SITE: datadoghq.com
+          DD_ENV: ci
+          DD_SERVICE: cloudbolt
+        run: >
+          poetry run pytest
+          --ddtrace
+          --cov='src/${{ matrix.pyapp }}'
+          --cov-config='src/.coveragerc'
+          --cov-branch
+          --cov-report=xml
+          --cov-report=term
+          --showlocals
+          -W ignore::DeprecationWarning
+          ${{ (inputs.full-crypto-flag == true) && '--full-crypto' || '--no-full-crypto' }}
+          src/${{ matrix.pyapp }} | tee /tmp/pytest.log
+
+      - name: Upload Coverage Reports to CodeCov
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        uses: codecov/codecov-action@v3.1.4
+        with:
+          move_coverage_to_trash: true

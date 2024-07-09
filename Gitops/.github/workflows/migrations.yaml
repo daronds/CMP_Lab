@@ -1,0 +1,81 @@
+name: Check Migrations
+
+on:
+  workflow_call:
+
+jobs:
+  pytest-pra:
+    name: Check Migrations
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+    steps:
+      - uses: actions/checkout@v4.1.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.sha }}
+
+      - name: Add poetry to Path
+        run: |
+          echo "/opt/poetry/bin" >> $GITHUB_PATH
+          echo "/usr/local/bin/" >> $GITHUB_PATH
+
+      - name: Get poetry cache dir
+        id: poetry-cache
+        run: echo "dir=$(poetry config cache-dir)" >> $GITHUB_OUTPUT
+
+      - name: Poetry cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.poetry-cache.outputs.dir }}
+          key: ${{ runner.os }}-el8-poetry-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Setup Pip CodeArtifact
+        run: |
+          aws codeartifact login --tool pip --repository python --domain cloudbolt --domain-owner 499620025628 --region us-east-1
+
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
+
+      - name: Pip cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/*requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-el8-pip-
+
+      - name: Pip Install
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sudo dnf install -y curl-devel openldap-devel libxml2-devel
+          # It is safe to continue on error here because anything pip misses is picked up by poetry
+          pip install -r ./cloudbolt_installer/04-python-pkgs/piprequirements.txt || :
+          pip install -r ./cloudbolt_installer/04-python-pkgs/devrequirements.txt || :
+
+      - name: Poetry Install
+        run: |
+          poetry config --local virtualenvs.create false
+          export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --region us-east-1 --domain cloudbolt --domain-owner 499620025628 --query authorizationToken --output text)
+          poetry config repositories.python https://cloudbolt-499620025628.d.codeartifact.us-east-1.amazonaws.com/pypi/python/simple/
+          poetry config http-basic.python aws $CODEARTIFACT_AUTH_TOKEN
+          poetry config virtualenvs.options.system-site-packages true
+          poetry install --with=dev
+
+      - name: Ensure cloudbolt user exists
+        run: |
+          sudo useradd cloudbolt || :
+          sudo groupadd cloudbolt || :
+
+      - name: Run Check Migrations
+        working-directory: ./src
+        env:
+          TESTING: False
+        run: |
+          poetry run python -m manage makemigrations --check --dry-run --noinput

@@ -1,0 +1,129 @@
+name: Deploy OVA to VCenter Content Library
+
+on:
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: A release tag
+        required: false
+        default: v2022.3.1
+      ova-prefix:
+        description: The prefix of the OVA to download
+        required: true
+  workflow_call:
+    inputs:
+      release-tag:
+        description: A release tag
+        required: true
+        type: string
+      ova-prefix:
+        description: The prefix of the OVA to download
+        required: true
+        type: string
+    secrets:
+      SLACK_DEVOPS_GITHUB_ACTION_ALERTS_WEBHOOK:
+        description: |
+          Slack Token used to post to the devops-github-action-alerts slack channel
+        required: true
+      CLOUDBOLT_ACTION_HELPER_PEM:
+        description: Pem for the GitHub App that we use as a helper
+        required: true
+      KSM_CONFIG:
+        description: KSM configuration
+        required: true
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  deploy:
+    name: Deploy OVA to VCenter Content Library
+    permissions: write-all
+    environment: vCenter Content Library
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    steps:
+      - name: Add /usr/local/bin to PATH
+        run: echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+      
+      - name: Install GOVC CLI
+        working-directory: image_build
+        run: |
+          curl -L -o govc.tar.gz https://github.com/vmware/govmomi/releases/download/v0.33.0/govc_Linux_x86_64.tar.gz
+          tar -xzf govc.tar.gz -C /tmp/
+          chmod +x /tmp/govc
+          sudo mv /tmp/govc /usr/local/bin/
+
+      - name: Set Environment Variables
+        uses: ./.github/actions/set-vcenter-environment-vars-by-environment
+        with:   
+          varFilePath: ./.github/variables/cbsw.io.env
+
+      - name: Retrieve secrets from Keeper
+        id: ksecrets
+        uses: Keeper-Security/ksm-action@v1.0.2
+        with:
+          keeper-secret-config: ${{ secrets.KSM_CONFIG }}
+          secrets: |
+              tIMQtRmKrd75wXq0sm8sgg/field/password > env:VCENTER_PACKER_PASSWORD
+              tIMQtRmKrd75wXq0sm8sgg/field/login > env:VCENTER_PACKER_USER
+              ${{ env.VCENTER_SERVER_KEEPER_ID }}/custom_field/server_fqdn > env:VCENTER_SERVER
+
+      - name: Configure DNS
+        run: |
+          echo "search cbsw.io" > /etc/resolv.conf
+          echo "nameserver 10.133.241.11" >> /etc/resolv.conf
+          echo "nameserver 10.133.242.12" >> /etc/resolv.conf
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+
+      - name: Format Tag as Version
+        id: format-tag-as-version
+        uses: ./.github/actions/strip-version-action
+        with:
+          version: ${{ github.event.inputs.release-tag || inputs.release-tag || github.ref_name }}
+
+      - name: Create Directory for VMware OVA
+        working-directory: image_build
+        run: mkdir -p ./downloads
+
+      - name: Download OVA from S3 Bucket
+        working-directory: image_build
+        env:
+          TAG: ${{ github.event.inputs.release-tag || inputs.release-tag || github.ref_name }}
+        run: >
+          aws s3 cp
+          s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/${{ inputs.ova-prefix }}${{ env.TAG }}.ova
+          ./downloads/${{ inputs.ova-prefix }}${{ env.TAG }}.ova
+          --endpoint-url http://s3-accelerate.amazonaws.com
+          || aws s3 cp
+          s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/CloudBolt_${{ env.TAG }}.ova
+          ./downloads/CloudBolt_${{ env.TAG }}.ova
+          --endpoint-url http://s3-accelerate.amazonaws.com
+
+
+      - name: Add OVA to vCenter Content Library with govc
+        working-directory: image_build
+        env:
+          GOVC_URL: ${{ env.VCENTER_SERVER }}
+          GOVC_USERNAME: ${{ env.VCENTER_PACKER_USER }}
+          GOVC_PASSWORD: ${{ env.VCENTER_PACKER_PASSWORD }}
+          GOVC_INSECURE: true
+          TAG: ${{ github.event.inputs.release-tag || inputs.release-tag || github.ref_name }}
+        run: >
+          echo "Uploading $OVA_FILE to Content Library ${{ env.VCENTER_CONTENT_LIBRARY }}" &&
+          govc library.import
+          ${{ env.VCENTER_CONTENT_LIBRARY }}
+          ./downloads/${{ inputs.ova-prefix }}${{ env.TAG }}.ova

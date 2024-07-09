@@ -1,0 +1,343 @@
+name: Release Candidate Build
+on:
+  push:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+    inputs:
+      hui-additional-options:
+        description: |
+          Additional options to pass to pytest for HUI tests. (Example: -m for including/excluding marked tests)
+        required: false
+        type: string
+        default: ""
+      api-additional-options:
+        description: |
+          Additional options to pass to pytest for API tests. (Example: -m for including/excluding marked tests)
+        required: false
+        type: string
+        default: ""
+
+concurrency: staging_environment
+
+jobs:
+  tag:
+    name: Increment RC Tag
+    uses: ./.github/workflows/tag.increment-prerelease.yml
+    secrets: inherit
+  content-library:
+    name: Kick off content-library workflow
+    uses: ./.github/workflows/content-library-release.yml
+    with:
+      environment: Production
+      publish: true
+    secrets: inherit
+    needs:
+      - tag
+  build-gulp:
+    name: Build Gulp
+    uses: ./.github/workflows/build.gulp.yml
+    secrets: inherit
+  build-cmp-setup-ui:
+    name: Build CMP Setup UI
+    uses: ./.github/workflows/build.cmp-setup-ui.yml
+    secrets: inherit
+  build-cmp-vue:
+    name: Build CMP Vue
+    uses: ./.github/workflows/build.cmp-vue.yml
+    secrets: inherit
+  build-cmp-vue-3:
+    name: Build CMP Vue 3
+    uses: ./.github/workflows/build.cmp-vue-3.yml
+    secrets: inherit
+  build-generate-artifact-names:
+    name: Generate Artifact Names
+    uses: ./.github/workflows/build.generate-artifact-names.yml
+    secrets: inherit
+  build-postgresql-snapshot:
+    name: Build PostgreSQL Snapshot
+    uses: ./.github/workflows/build.postgresql-snapshot.yml
+    secrets: inherit
+    with:
+      postgres: ${{ needs.build-generate-artifact-names.outputs.postgres }}
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+    needs:
+      - build-generate-artifact-names
+      - tag
+  build-el8-rpm:
+    uses: ./.github/workflows/build.rpm.el8.yml
+    with:
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+    secrets: inherit
+    needs: tag
+  build-el7-rpm:
+    uses: ./.github/workflows/build.rpm.el7.yml
+    with:
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+    secrets: inherit
+    needs: tag
+  build-local-dnf-repos:
+    name: Build airgapped DNF repos
+    uses: ./.github/workflows/build.rpm.create-local-repo.yml
+    with:
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+    secrets: inherit
+    needs:
+      - tag
+  build-upgrader-and-installer:
+    name: Build Installer
+    uses: ./.github/workflows/build.installer.yml
+    with:
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+      make-cmp-setup-ui-distro-package-path: ${{ needs.build-cmp-setup-ui.outputs.path }}
+      postgres-ss-s3-location-latest: ${{ needs.build-postgresql-snapshot.outputs.postgres-ss-s3-location-latest }}
+      postgres-ss-s3-location: ${{ needs.build-postgresql-snapshot.outputs.postgres-ss-s3-location }}
+      short_sha: ${{ needs.build-generate-artifact-names.outputs.short_sha }}
+      minimal_repo_artifact: ${{ needs.build-local-dnf-repos.outputs.minimal_repo_artifact }}
+    secrets: inherit
+    needs:
+      - tag
+      - build-el8-rpm
+      - build-el7-rpm
+      - build-local-dnf-repos
+      - build-cmp-setup-ui
+      - build-cmp-vue
+      - build-cmp-vue-3
+      - build-postgresql-snapshot
+      - build-generate-artifact-names
+      - build-gulp
+  upload-sbom:
+    name: Upload Sbom
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - m7a-large
+    needs:
+      - tag
+      - build-upgrader-and-installer
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+          revoke: false
+      - name: Run SBOM Generation Workflow
+        uses: CloudBoltSoftware/generate-sbom-action@main
+        with:
+          repo: 'CloudBoltSoftware/cloudbolt'
+          release: ${{ needs.tag.outputs.release_tag }}
+          artifact: '*el8.x86_64.rpm'   # Specify the artifact name
+          token: ${{ steps.generate-token.outputs.token }}
+          dry_run: 'false'
+  build-ol8-ova:
+    name: Build OL8 OVA
+    environment: Build OL8 OVA
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+    needs:
+      - tag
+      - build-upgrader-and-installer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+      - name: Build OL8 OVA
+        uses: ./.github/actions/build-ova-ol8
+        with:
+          release-tag: ${{ needs.tag.outputs.release_tag }}
+          cloudbolt-action-helper-pem: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+          ksm-config: ${{ secrets.KSM_CONFIG }}
+          
+  rc-validation-test-setup:
+    name: RC Validation Test Setup
+    uses: ./.github/workflows/rc-validation-test-setup.yml
+    needs:
+     - build-upgrader-and-installer
+     - tag
+    with:
+      release-tag: ${{ needs.tag.outputs.release_tag }}
+    secrets: inherit
+
+  run-rc-validation-tests:
+    name: Launch Validation Tests
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        arrays: [ { test-suite-path: "./cmp/ui/hui/tests", additional-options: "${{ inputs.hui-additional-options }}", test-area: "HUI" },
+                  { test-suite-path: "./cmp/api/tests", additional-options: "${{ inputs.api-additional-options }}", test-area: "API" } ]
+    uses: ./.github/workflows/rc-validation-test.yml
+    needs:
+      - rc-validation-test-setup
+      - tag
+    with:
+      ip: ${{ needs.rc-validation-test-setup.outputs.ip_address }}
+      test_suite_path: ${{ matrix.arrays.test-suite-path }}
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+      additional_options: ${{ matrix.arrays.additional-options }}
+      test_area: ${{ matrix.arrays.test-area }}
+    secrets: inherit
+
+  cleanup-ec2-instance:
+    name: Delete Test Resources
+    needs:
+      - rc-validation-test-setup
+      - run-rc-validation-tests
+    runs-on:
+      - self-hosted
+      - ubuntu
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: ${{ vars.CMP_STAGING_GITHUB_APP_ID }}
+          private_key: ${{ secrets.CMP_STAGING_GITHUB_APP_PEM }}
+          revoke: false
+
+      - name: Checkout Test-Automation Repo
+        uses: actions/checkout@v4.1.1
+        with:
+          repository: CloudBoltSoftware/test-automation
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Run Cleanup Script
+        uses: ./.github/actions/cleanup-script
+        id: run-cleanup-script
+        continue-on-error: true
+        with:
+          ip-address: ${{ needs.rc-validation-test-setup.outputs.ip_address }}
+          git-token: ${{ steps.generate-token.outputs.token }}
+
+  take-snapshot:
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    environment: staging
+    name: Take Snapshot
+    outputs:
+      snapshot_id: ${{ steps.take-snapshot.outputs.snapshot_id }}
+    needs:
+      - rc-validation-test-setup
+      - run-rc-validation-tests
+      - tag
+      - cleanup-ec2-instance
+    if: ${{ always() && needs.rc-validation-test-setup.result == 'success' }}
+    steps:
+      - name: Add /usr/local/bin to PATH
+        shell: bash -leo pipefail {0}
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-skip-session-tagging: true
+
+      - name: Identify EBS Volume and Create Snapshot
+        id: take-snapshot
+        run: |
+          INSTANCE_ID=${{ vars.instance_id }}
+          VOLUME_ID=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[*].Instances[*].[BlockDeviceMappings[*].Ebs.VolumeId]" --output text)
+          SNAPSHOT_ID=$(aws ec2 create-snapshot --volume-id $VOLUME_ID --description "${{ needs.tag.outputs.release_tag }}" --query "SnapshotId" --output text)
+          echo "snapshot_id=$SNAPSHOT_ID" >> $GITHUB_OUTPUT
+
+  revert-to-last-snapshot:
+    if: ${{ always() && needs.run-rc-validation-tests.result != 'success'}}
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    environment: staging
+    name: Revert to Last Snapshot
+    needs:
+      - rc-validation-test-setup
+      - run-rc-validation-tests
+      - tag
+      - take-snapshot
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-skip-session-tagging: true
+
+      - name: Revert to Last Snapshot
+        id: revert-to-last-snapshot
+        uses: CloudBoltSoftware/update-ec2-instance-volume-action@v1.0.1
+        with:
+          instance-id: ${{ vars.instance_id }}
+          snapshot-id: ${{ vars.LAST_VALIDATED_SNAPSHOT }}
+          region: ${{ vars.AWS_REGION }}
+          tag: ${{ needs.tag.outputs.release_tag }}
+
+  update-staging-last-good-snapshot:
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+    environment: staging
+    name: Update Staging Environment Snapshot ID
+    needs:
+      - take-snapshot
+      - tag
+      - run-rc-validation-tests
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+
+      - name: Update Snapshot Variable in Staging Environment
+        id: update_vars
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          echo "Snapshot ID will be updated to ${{ needs.take-snapshot.outputs.snapshot_id }}" >> $GITHUB_STEP_SUMMARY
+          gh variable set LAST_VALIDATED_SNAPSHOT --env staging --body "${{ needs.take-snapshot.outputs.snapshot_id }}"
+
+  promote-ga:
+    name: Promote GA
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - m7a-large
+    needs:
+      - tag
+      - run-rc-validation-tests
+      - build-ol8-ova
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+          revoke: false
+      - name: Promote GA
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh workflow run promote.ga.yml
+          -f release_tag=${{needs.tag.outputs.release_tag}}
+          --repo CloudBoltSoftware/cloudbolt

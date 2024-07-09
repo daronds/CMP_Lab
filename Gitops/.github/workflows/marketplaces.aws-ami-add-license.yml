@@ -1,0 +1,57 @@
+name: AWS Build Ami with license
+
+on:
+  workflow_dispatch:
+    # Inputs the workflow accepts.
+    inputs:
+      packer_parameters:
+        description: Packer Parameters (formly known as params.json s3 path)
+        required: true
+      source_ami:
+        default: "ami-09607037a036826bc"
+      include-license:
+        default: ""
+      disable-heartbeat:
+        default: false
+
+jobs:
+  Build:
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+
+      - name: Pull params.json
+        working-directory: image_build
+        run: aws s3 cp ${{ github.event.inputs.packer_parameters }} ./params.json
+
+      - name: Extract Parameters
+        id: extract-parameters
+        working-directory: image_build
+        run: |
+          export INSTALLER_S3_URL=$(jq -r '.cb_installer_url' params.json)
+          export INSTALLER_URL=$(aws s3 presign $INSTALLER_S3_URL --expires-in 86400)
+          echo "s3-url=$INSTALLER_S3_URL" >> $GITHUB_OUTPUT
+          echo "url=$INSTALLER_URL" >> $GITHUB_OUTPUT
+
+      - name: Include License
+        working-directory: image_build
+        run: >
+          aws s3 cp s3://cb-marketplace-licenses/${{ github.event.inputs.include-license }} ./${{ github.event.inputs.include-license }}
+
+      - name: Packer Build
+        # env:
+        # PACKER_LOG: 1
+        working-directory: image_build
+        run: >
+          /usr/bin/packer build 
+          -force 
+          --var-file=./params.json 
+          --var='vpc=${{secrets.vpc}}' 
+          --var='subnet=${{secrets.subnet}}' 
+          --var='license=${{github.event.inputs.include-license}}' 
+          --var='disable_heartbeat=${{github.event.inputs.disable-heartbeat}}'
+          ./clouds/aws-marketplace.pkr.hcl

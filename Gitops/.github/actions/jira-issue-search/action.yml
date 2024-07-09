@@ -1,0 +1,28 @@
+name: Jira Search Issues
+description: Finds a Jira issue
+inputs:
+  query:
+    required: true
+  jira-token:
+    required: true
+  jira-user:
+    required: true
+outputs:
+  issues:
+    value: ${{ steps.search-jira-issues.outputs.issues }}
+runs:
+  using: "composite"
+  steps:
+    - name: Search Jira Issues
+      id: search-jira-issues
+      shell: bash -leo pipefail {0}
+      run: |
+        RESULT=$(curl \
+          -G \
+          --data-urlencode 'query=${{ inputs.query }}' \
+          --user '${{ inputs.jira-user }}:${{ inputs.jira-token }}' \
+          --header 'Accept: application/json' \
+          --url 'https://cloudbolt.atlassian.net/rest/api/3/issue/picker' )
+        echo "$RESULT"
+        echo "$RESULT" | jq . -c --raw-output
+        echo "::set-output name=issues::$(echo $RESULT | jq . -c --raw-output)"

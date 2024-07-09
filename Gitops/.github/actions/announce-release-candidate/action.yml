@@ -1,0 +1,86 @@
+name: 'Announce Release Candidate'
+description: 'Announces Release Candidate on Slack'
+inputs:
+  release-tag:
+    description: 'Tag of the release'
+    required: true
+  slack-bot-token:
+    description: 'Token for Slack bot'
+    required: true
+  dev-release-channel:
+    description: 'Slack channel ID for development releases'
+    required: true
+  github-token:
+    description: 'Token for GitHub'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download .txt files
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: >
+        gh release download
+        ${{ inputs.release-tag }}
+        --repo CloudBoltSoftware/cloudbolt
+        --pattern "*.txt"
+
+    - name: Get Upgrader Link
+      shell: bash
+      id: get-upgrader-link
+      run: |
+        echo "upgrader_location=$(cat ./upgrader_location.txt)" >> $GITHUB_OUTPUT
+
+    - name: Post to a Slack channel
+      id: slack
+      uses: slackapi/slack-github-action@v1.24.0
+      env:
+        SLACK_BOT_TOKEN: ${{ inputs.slack-bot-token }}
+      with:
+        channel-id: '${{ inputs.dev-release-channel }}'
+        payload: |
+          {
+            "text": "🚀 New Release Candidate Available: Version ${{ inputs.release-tag }}",
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": "🚀 New Build Available: Version ${{ inputs.release-tag }}"
+                }
+              },
+              {
+                  "type": "divider"
+              },
+              {
+                  "type": "section",
+                  "text": {
+                      "type": "mrkdwn",
+                      "text": "*Upgrader:* <${{ steps.get-upgrader-link.outputs.upgrader_location }}|${{ steps.get-upgrader-link.outputs.upgrader_location }}>"
+                  }
+              },
+              {
+                  "type": "divider"
+              },
+              {
+                  "type": "section",
+                  "text": {
+                      "type": "mrkdwn",
+                      "text": "*GitHub Release:* <https://github.com/CloudBoltSoftware/cloudbolt/releases/tag/${{ inputs.release-tag }}|View on GitHub>"
+                  }
+              },
+              {
+                  "type": "divider"
+              },
+              {
+                  "type": "section",
+                  "text": {
+                      "type": "mrkdwn",
+                      "text": "*Promotion Deployment Job:* <https://github.com/CloudBoltSoftware/cloudbolt/actions/runs/${{ github.run_id }}|Access promotion job on GitHub>"
+                  }
+              }
+            ]
+          }
+

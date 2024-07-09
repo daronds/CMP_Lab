@@ -1,0 +1,186 @@
+name: Generate CCAT Snapshot
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Pre-release or release tag used to generate the CCAT snapshot"
+        required: true
+        type: string
+      prerelease:
+        description: "Whether or not this is a pre-release"
+        required: true
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to use for the Docker image running the tool"
+        required: true
+      prerelease:
+        description: "Whether or not this is a pre-release"
+        required: true
+        type: boolean
+env:
+  CCAT_REPO: CloudBoltSoftware/customer-code-analysis
+  CCAT_PATH: ${{ github.workspace }}/tools/ccat
+  CCAT_S3_BUCKET: s3://cb-internal-builds/CCAT/snapshots/
+  GEN_SNAPSHOT_BIN: generate-snapshot
+  LICENSE_FILENAME: internal-big-license.bin
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  snapshot:
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Checkout CloudBolt repository
+        uses: actions/checkout@v4.1.1
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          ref: ${{ github.event.inputs.tag || inputs.tag }}
+
+      - name: Checkout CCAT repository
+        uses: actions/checkout@v4.1.1
+        with:
+          repository: ${{ env.CCAT_REPO }}
+          path: ${{ env.CCAT_PATH }}
+          token: ${{ steps.generate-token.outputs.token }}
+
+      # The github.head_ref value is only avaiable on PRs, so we derive it here.
+      # Also derive a CB version name to use, if a VERSION file does not exist.
+      - name: Get CB version info
+        id: cb-info
+        run: |
+          echo "::group::"
+          echo "Got CB_VERSION: ${{ github.event.inputs.tag || inputs.tag }}"
+          CB_VERSION=$(echo '${{ github.event.inputs.tag || inputs.tag }}' | cut -d'-' -f1)
+          echo "CB_VERSION=$CB_VERSION" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Get CCAT info
+        id: ccat-info
+        run: |
+          echo "::group::Configuring environment"
+          export CCAT_DB_NAME=${{ steps.cb-info.outputs.CB_VERSION }}.db
+          echo "CCAT_DB_NAME=${CCAT_DB_NAME}" >> $GITHUB_OUTPUT
+          echo "CCAT_VERSION_FILE=${{ env.CCAT_PATH }}/ccat/customer/VERSION" >> $GITHUB_OUTPUT
+          echo "SNAPSHOT_BRANCH=${{ github.event.inputs.tag || inputs.tag }}" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Upgrade pip
+        run: |
+          echo "::group::Upgrading Pip"
+          pip install --upgrade pip
+          pip install -r ${{ env.CCAT_PATH }}/requirements.txt
+          pip install gevent
+          echo "::endgroup::"
+
+      - name: Make snapshot tool
+        run: |
+          echo "::group::Packaging internal tool"
+          cd ${{ env.CCAT_PATH }}
+          make build-internal
+          cd ${{ github.workspace }}
+          cp ${{ env.CCAT_PATH }}/dist/${{ env.GEN_SNAPSHOT_BIN }} ${{ github.workspace }}/
+          echo "::endgroup::"
+
+      - name: Generate Snapshot
+        id: gen-snapshot
+        env:
+          LICENSE_FILE: /opt/cloudbolt/tools/${{ env.LICENSE_FILENAME }}
+        run: |
+          echo "::group::Generate CCAT snapshot"
+          export GEN_SNAPSHOT_CMD=./${{ env.GEN_SNAPSHOT_BIN }}
+          export LICENSE_FILE=${{ env.LICENSE_FILE }}
+          export PYTHONPATH=${{ env.CCAT_PATH }}
+          ./generate-snapshot ./${{ steps.ccat-info.outputs.CCAT_DB_NAME}} --scan-root=./src --strip-prefix=cloudbolt --verbose
+          echo "::group::Artifacts"
+          echo "Snapshot: $(ls -l ${{ steps.ccat-info.outputs.CCAT_DB_NAME }})"
+          echo "Log file: $(ls -l ${{ github.workspace }}/ccat_snapshot.log)"
+          echo "CCAT_LOG_FILE=${{ github.workspace }}/ccat_snapshot.log" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Save CCAT snapshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccat-snapshot
+          path: ${{ steps.ccat-info.outputs.CCAT_DB_NAME }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Save CCAT logfile artifact
+        uses: actions/4pload-artifact@v4
+        with:
+          name: ccat-log
+          path: ${{ steps.gen-snapshot.outputs.CCAT_LOG_FILE }}
+          if-no-files-found: error
+          retention-days: 7
+
+      # Skip the following actions if this was a manual request
+      - name: Upload new snapshot to S3
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        run: |
+          echo "::group::Upload snapshot ${{ steps.ccat-info.outputs.CCAT_DB_NAME }} to ${{ env.CCAT_S3_BUCKET }}"
+          aws s3 cp --quiet ${{ steps.ccat-info.outputs.CCAT_DB_NAME }} ${{ env.CCAT_S3_BUCKET }}
+          echo "::endgroup::"
+
+      - name: Increment CCAT patch version number
+        id: inc-ccat-ver
+        env:
+          BUMP_VERSION_CMD: ${{ env.CCAT_PATH }}/scripts/sem-ver-bump.sh
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          echo "::group::Incrementing CCAT customer tool's patch version number"
+          rm -f ${{ steps.ccat-info.outputs.CCAT_VERSION_FILE }}
+          gh api /repos/CloudBoltSoftware/customer-code-analysis/releases/latest --jq ".tag_name" >  ${{ steps.ccat-info.outputs.CCAT_VERSION_FILE }}
+          echo "Version file: $(ls -l ${{ steps.ccat-info.outputs.CCAT_VERSION_FILE }})"
+          ${BUMP_VERSION_CMD} ${{ steps.ccat-info.outputs.CCAT_VERSION_FILE }} --patch
+          echo "CCAT_NEW_VERSION=$(cat ${{ steps.ccat-info.outputs.CCAT_VERSION_FILE }})" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Upload CCAT to Release
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          gh release upload ${{ github.event.inputs.tag || inputs.tag }} ${{ steps.ccat-info.outputs.CCAT_DB_NAME }} --clobber
+
+      - name: Update Latest CCAT Release
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        if: ${{ github.event.inputs.prerelease == 'false' || inputs.prerelease == 'false' }}
+        run: |
+          echo "::group:: Create CCAT release ${{ steps.ccat-info.outputs.CCAT_VERSION_FILE }}"
+          gh release create \
+          --repo CloudBoltSoftware/customer-code-analysis \
+          --title "${{ steps.inc-ccat-ver.outputs.CCAT_NEW_VERSION }}" \
+          --notes "Automated release of CCAT snapshot for CloudBolt CMP Version ${{ github.event.inputs.tag || inputs.tag }}" \
+          ${{ steps.inc-ccat-ver.outputs.CCAT_NEW_VERSION }}
+          echo "::endgroup::"
+          echo "::group::Update latest CCAT release"
+
+          gh release upload \
+          --repo CloudBoltSoftware/customer-code-analysis \
+          ${{ steps.inc-ccat-ver.outputs.CCAT_NEW_VERSION }} \
+          ${{ steps.ccat-info.outputs.CCAT_DB_NAME }}
+          echo "::endgroup::"
+      - name: Post to a Slack channel
+        id: slack
+        uses: slackapi/slack-github-action@v1.25.0
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        with:
+          channel-id: 'C04AZHG8BNC'
+          payload: |
+            {"text":"CCAT DB Snaopshot Generated","blocks":[{"type":"header","text":{"type":"plain_text","text":"The Customer Code Analysis Tool ${{ steps.inc-ccat-ver.outputs.CCAT_NEW_VERSION }} database snapshot for cloudbolt ${{ github.event.inputs.tag || inputs.tag }} has completed","emoji":true}},{"type":"section","text":{"type":"mrkdwn","text":"CCAT snapshot: ${{ steps.ccat-info.outputs.CCAT_DB_NAME }}"}},{"type":"section","text":{"type":"mrkdwn","text":"Click this button to view the build logs :point_right:"},"accessory":{"type":"button","text":{"type":"plain_text","text":"View Run","emoji":true},"value":"view_run","url":"${{ github.server_url}}/${{ github.repository }}/actions/runs/${{ github.run_id }}","action_id":"button-action"}},{"type":"section","text":{"type":"mrkdwn","text":"Click this button to view the Release Notes and Artifacts (if GA) :point_right:"},"accessory":{"type":"button","text":{"type":"plain_text","text":"View Release","emoji":true},"value":"click_me_123","url":"${{ github.server_url}}/${{ github.repository }}/releases/tag/${{ steps.inc-ccat-ver.outputs.CCAT_NEW_VERSION }}","action_id":"button-action"}}]}

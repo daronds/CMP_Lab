@@ -1,0 +1,239 @@
+name: 002 Build CloudBolt RPM update repo
+# yamllint disable-line rule:truthy
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+        required: true
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  update-rpm-repos:
+    name: Update ${{ matrix.base-image }} 8 RPM REPO
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+    strategy:
+      fail-fast: false
+      matrix:
+        base-image:
+          - rockylinux8
+          - oraclelinux8
+          - rhel8
+    steps:
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Download Release Artifact
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh release download 
+          ${{ inputs.release_tag || github.event.inputs.release_tag }} 
+          -p "cloudbolt-*el8.x86_64.rpm" 
+          --clobber
+          --repo "CloudBoltSoftware/cloudbolt"
+
+      - name: Set Distro Name
+        id: distro-name
+        run: |
+          case ${{ matrix.base-image }} in
+            rockylinux8)
+              distro="rocky"
+              ;;
+            oraclelinux8)
+              distro="ol"
+              ;;
+            rhel8)
+              distro="rhel"
+              ;;
+          esac
+          if [ -z "$distro" ]; then
+            echo "Unknown distro: ${{ matrix.base-image }}"
+            exit 1
+          fi
+          echo "name=$distro" >> $GITHUB_OUTPUT
+
+      - name: AWS ECR Login
+        run: |
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 499620025628.dkr.ecr.us-east-1.amazonaws.com
+
+      
+      - name: Stop container if already running
+        run: |
+          docker stop cloudbolt-rpm-builder || :
+          docker rm cloudbolt-rpm-builder || :
+
+      - name: Start Container
+        env:
+          RHEL_PASSWORD: ${{ secrets.RHEL_PASSWORD }}
+          RHEL_USERNAME: ${{ secrets.RHEL_USERNAME }}
+        run: >
+          docker run
+          -it
+          -d
+          -e RHEL_USERNAME=$RHEL_USERNAME
+          -e RHEL_PASSWORD=$RHEL_PASSWORD
+          --name cloudbolt-rpm-builder
+          499620025628.dkr.ecr.us-east-1.amazonaws.com/${{ matrix.base-image }}-rpmbuilder:latest
+          /bin/bash
+
+      - name: Copy rpm to container
+        run: |
+          docker exec cloudbolt-rpm-builder /bin/bash -c "mkdir -p /root/rpmbuild/RPMS/x86_64/"
+          docker cp ./cloudbolt-*.el8.x86_64.rpm cloudbolt-rpm-builder:/root/rpmbuild/RPMS/x86_64/
+
+      - name: Download current state of RPMs Repo
+        run: |
+          mkdir -p ./rpms-repo
+          aws s3 sync --quiet s3://cloudbolt-rpm-repo ./rpm-repo
+
+      - name: Download RPM Dependencies and create repo
+        continue-on-error: true
+        run: >
+          docker cp ./rpm-repo/ cloudbolt-rpm-builder:/tmp/rpms/
+          && docker exec cloudbolt-rpm-builder /bin/bash -c "dnf install -y createrepo"
+          && docker exec cloudbolt-rpm-builder /bin/bash -c
+          "dnf download
+          --resolve
+          --alldeps
+          --downloaddir=/tmp/rpms/${{ steps.distro-name.outputs.name }}/8/os/x86_64/Packages/
+          /root/rpmbuild/RPMS/x86_64/cloudbolt-*.rpm"
+
+      - name: Create Local Repo
+        run: >
+          docker exec cloudbolt-rpm-builder
+          /bin/bash -c
+          "createrepo
+          /tmp/rpms/${{ steps.distro-name.outputs.name }}/8/os/x86_64/Packages/"
+
+      - name: Download RPM Dependencies
+        run: >
+          mkdir -p ./rpm-repo/
+          && docker cp
+          cloudbolt-rpm-builder:/tmp/rpms/${{ steps.distro-name.outputs.name }}/
+          ./rpm-repo
+
+      - name: Update S3 Repo
+        run: |
+          aws s3 sync ./rpm-repo s3://cloudbolt-rpm-repo
+
+  enterprise-linux-7-rpm-builder:
+    name: Update Enterprise Linux 7 RPM Repo
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Download Release Artifact
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh release download 
+          ${{ inputs.release_tag || github.event.inputs.release_tag }} 
+          -p "cloudbolt-*el7.x86_64.rpm"
+          --clobber
+          --repo "CloudBoltSoftware/cloudbolt"
+
+      - name: AWS ECR Login
+        run: |
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 499620025628.dkr.ecr.us-east-1.amazonaws.com
+
+      - name: Stop container if already running
+        run: |
+          docker stop cloudbolt-rpm-builder || :
+          docker rm cloudbolt-rpm-builder || :
+
+      - name: Start Container
+        run: >
+          docker run
+          -it
+          -d
+          --name cloudbolt-rpm-builder
+          -v $(pwd):/cloudbolt
+          499620025628.dkr.ecr.us-east-1.amazonaws.com/centos7-rpmbuilder:latest
+          /bin/bash
+
+      - name: Install Centos Release SCL
+        continue-on-error: true
+        run: >
+          docker exec
+          cloudbolt-rpm-builder
+          /bin/bash
+          -c "yum install -y dnf centos-release-scl && yum -qy update"
+
+      - name: Copy rpm to container
+        run: |
+          docker exec cloudbolt-rpm-builder /bin/bash -c "mkdir -p /root/rpmbuild/RPMS/x86_64/"
+          docker cp ./cloudbolt-*el7.x86_64.rpm cloudbolt-rpm-builder:/root/rpmbuild/RPMS/x86_64/
+
+      - name: Download current state of RPMs Repo
+        run: |
+          aws s3 sync s3://cloudbolt-rpm-repo ./rpm-repo
+
+      - name: Upload RPM Dependencies to container
+        run: |
+          docker cp ./rpm-repo/ cloudbolt-rpm-builder:/tmp/rpm-repo/
+
+      - name: Download RPM Dependencies and create repo
+        continue-on-error: true
+        run: >
+          docker cp ./rpm-repo/ cloudbolt-rpm-builder:/tmp/rpms/
+          && docker exec cloudbolt-rpm-builder /bin/bash -c "dnf install -y dnf-plugins-core createrepo"
+          && docker exec cloudbolt-rpm-builder /bin/bash -c "dnf config-manager --add-repo https://pkgs.cloudbolt.io/centos/7/os/x86_64/Packages/cloudbolt-centos-7.repo"
+          && docker exec cloudbolt-rpm-builder /bin/bash -c
+          "dnf download
+          --resolve
+          --alldeps
+          --downloaddir=/tmp/rpms/centos/7/os/x86_64/Packages/
+          /root/rpmbuild/RPMS/x86_64/cloudbolt-*.rpm"
+
+      - name: Create Local Repo
+        run: >
+          docker exec cloudbolt-rpm-builder
+          /bin/bash -c
+          "createrepo
+          /tmp/rpms/centos/7/os/x86_64/Packages/"
+
+      - name: Download RPM Dependencies
+        run: >
+          mkdir -p ./rpm-repo/
+          && docker cp
+          cloudbolt-rpm-builder:/tmp/rpms/centos/
+          ./rpm-repo
+
+      - name: Update S3 Repo
+        run: |
+          aws s3 sync ./rpm-repo s3://cloudbolt-rpm-repo
+
+      - name: Stop Container
+        if: always()
+        run: |
+          docker stop cloudbolt-rpm-builder || :
+          docker rm cloudbolt-rpm-builder || :
+

@@ -1,0 +1,140 @@
+name: Build Oracle Linux 8 AMI
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        required: true
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        required: true
+jobs:
+  Build:
+    name: Build Oracle Linux 8 AMI
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    environment:
+      name: OL8 AMI Build
+    outputs:
+      ami_id: ${{ steps.parse-manifest.outputs.ami_id }}
+    steps:
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "PATH=/usr/local/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+
+      - name: Make Downloads Directory
+        run: mkdir ./downloads
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Get Params.json for Release
+        working-directory: /opt/actions-runner/_work/cloudbolt/cloudbolt
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh release download
+          ${{ github.event.inputs.release_tag || inputs.release_tag }}
+          --repo cloudboltsoftware/cloudbolt
+          --pattern 'installer_location.txt'
+          --dir './downloads'
+
+      - name: Get Version
+        working-directory: /opt/actions-runner/_work/cloudbolt/cloudbolt
+        id: get-version
+        run: echo "version=${{ inputs.release_tag }}" >> $GITHUB_OUTPUT
+
+      - name: Get S3 installer URL
+        id: get-url
+        run: |
+          url=$(cat ./downloads/installer_location.txt)
+          echo "url=$url" >> $GITHUB_OUTPUT
+
+      - name: Print Step Outputs in GITHUB_STEP_SUMMARY
+        run: |
+          echo "| Step Name          | Output Name | Output Value              |"
+          echo "|--------------------|-------------|---------------------------|"
+          echo "| Get Version        | version     | ${{ steps.get-version.outputs.version }}    |"
+          echo "| Get S3 installer URL| url        | ${{ steps.get-url.outputs.url }}           |"
+
+      - name: Create Http Directory for installer
+        working-directory: /opt/actions-runner/_work/cloudbolt/cloudbolt
+        continue-on-error: true
+        run: mkdir -p ./image_build/http
+
+      - name: Download Installer
+        run: >
+          aws s3 cp
+          --quiet
+          ${{ steps.get-url.outputs.url }}
+          ./image_build/http/installer.tgz
+
+      - name: Setup `packer`
+        uses: hashicorp/setup-packer@v2.0.1
+        id: setup
+        with:
+          version: "latest"
+
+      - name: Run `packer init`
+        id: init
+        env:
+          PACKER_GITHUB_API_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          packer init ./image_build/clouds/aws_el8.pkr.hcl
+
+      - name: Run `packer validate`
+        id: validate
+        run: >
+          packer validate
+          --var='cb_version=${{ steps.get-version.outputs.version }}'
+          --var='vpc=${{secrets.AWS_AMI_BUILD_VPC}}'
+          --var='vpc=${{vars.WORKLOADS_NON_PROD_VPC}}'
+          --var='subnet=${{secrets.AWS_AMI_BUILD_SUBNET}}'
+          ./image_build/clouds/aws_el8.pkr.hcl
+
+      - name: Packer Build
+        env:
+          PACKER_LOG: 2
+        run: >
+          packer build
+          -force
+          --var='cb_version=${{ steps.get-version.outputs.version }}'
+          --var='vpc=${{secrets.AWS_AMI_BUILD_VPC}}'
+          --var='vpc=${{vars.WORKLOADS_NON_PROD_VPC}}'
+          --var='subnet=${{secrets.AWS_AMI_BUILD_SUBNET}}'
+          ./image_build/clouds/aws_el8.pkr.hcl
+
+      - name: Parse manifest file
+        id: parse-manifest
+        run: |
+          ami_id=$(cat manifest.json | jq -r '.builds[0].artifact_id' | cut -d ':' -f 2)
+          echo "ami_id=$ami_id" >> $GITHUB_OUTPUT
+
+      - name: Add AMI ID to GITHUB_STEP_SUMMARY
+        run: |
+          echo "| AMI ID            | ami_id      | ${{ steps.parse-manifest.outputs.ami_id }} |"
+
+      - name: Create ol8-ami.txt
+        run: |
+          echo "${{ steps.parse-manifest.outputs.ami_id }}" > ol8-ami.txt
+          
+      - name: Upload to Release
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh release upload
+          ${{ inputs.release_tag }}
+          --repo cloudboltsoftware/cloudbolt
+          --clobber
+          ol8-ami.txt

@@ -1,0 +1,223 @@
+name: 002 Make PostgreSQL Snapshot
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+      postgres:
+        type: string
+        description: Postgres snapshot name
+    outputs:
+      postgres-ss-s3-location-latest: 
+        value: ${{ jobs.make-postgres-snapshot.outputs.postgres-ss-s3-location-latest }}
+      postgres-ss-s3-location:
+        value: ${{ jobs.make-postgres-snapshot.outputs.postgres-ss-s3-location }}
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  make-postgres-snapshot:
+    name: Make PostgreSQL Snapshot
+    outputs:
+      postgres-ss-s3-location-latest: ${{ steps.output-postgres-ss-s3-location-latest.outputs.postgres-ss-s3-location-latest || steps.output-postgres-ss-s3-location-latest-rc.outputs.postgres-ss-s3-location }}
+      postgres-ss-s3-location: ${{ steps.output-postgres-ss-s3-location.outputs.postgres-ss-s3-location }}
+    env:
+      BUCKET: cb-internal-db-snapshots
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - m7a-large
+    steps:
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - uses: actions/checkout@v4.1.1
+        with:
+          path: main
+          submodules: "recursive"
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Add poetry to Path
+        run: |
+          echo "/opt/poetry/bin" >> $GITHUB_PATH
+          echo "/usr/local/bin/" >> $GITHUB_PATH
+
+      - name: Get poetry cache dir
+        id: poetry-cache
+        run: echo "dir=$(poetry config cache-dir)" >> $GITHUB_OUTPUT
+
+      - name: Poetry cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.poetry-cache.outputs.dir }}
+          key: ${{ runner.os }}-el8-poetry-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Setup Pip CodeArtifact
+        run: |
+          aws codeartifact login --tool pip --repository python --domain cloudbolt --domain-owner 499620025628 --region us-east-1
+
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
+
+      - name: Pip cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/*requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-el8-pip-
+
+      - name: Pip Install
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sudo dnf install -y curl-devel openldap-devel libxml2-devel
+          # It is safe to continue on error here because anything pip misses is picked up by poetry
+          poetry run pip install gitpython || :
+          poetry run pip install -r ./cloudbolt_installer/04-python-pkgs/piprequirements.txt || :
+          poetry run pip install -r ./cloudbolt_installer/04-python-pkgs/devrequirements.txt || :
+
+      - name: Poetry Install
+        working-directory: main
+        run: |
+          poetry config --local virtualenvs.create false
+          export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --region us-east-1 --domain cloudbolt --domain-owner 499620025628 --query authorizationToken --output text)
+          poetry config repositories.python https://cloudbolt-499620025628.d.codeartifact.us-east-1.amazonaws.com/pypi/python/simple/
+          poetry config http-basic.python aws $CODEARTIFACT_AUTH_TOKEN
+          poetry config virtualenvs.options.system-site-packages true
+          poetry install --with=dev
+
+      - name: Ensure cloudbolt user and groups
+        run: |
+          sudo useradd cloudbolt || :
+          sudo groupadd cloudbolt || :
+
+      - name: Download PostgreSQL Database Backup to s3 latest
+        if: ${{ github.base_ref == 'develop' }}
+        working-directory: main
+        run: |
+          aws s3 cp --quiet s3://${{ env.BUCKET }}/latest/postgres-latest.tar ./postgres-latest.tar
+
+      - name: Run Docker Compose Up
+        working-directory: main
+        run: |
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 499620025628.dkr.ecr.us-east-1.amazonaws.com
+          docker compose -f ./database_snapshots/docker-compose.yml up -d
+
+      - name: Download PostgreSQL Develop Database Backup to s3 latest
+        if: ${{ github.base_ref == 'develop' }}
+        working-directory: main
+        run: |
+          aws s3 cp --quiet s3://${{ env.BUCKET }}/latest/postgres-latest.tar ./postgres-latest.tar
+
+      - name: Download PostgreSQL Releae Database Backup to s3 latest
+        if: ${{ contains(github.base_ref, 'release/') || contains(inputs.release_tag, '-rc') }}
+        continue-on-error: true
+        working-directory: main
+        run: |
+          VERSION=$(echo "${{ inputs.release_tag }}" | cut -d '-' -f1)
+          echo "VERSION: $VERSION"
+          aws s3 cp --quiet s3://${{ env.BUCKET }}/latest/postgres-$VERSION-latest-rc.tar ./postgres-latest-rc.tar
+
+      # Remove after merge to develop
+      - name: Install psycopg2
+        if: ${{ github.base_ref == 'develop' || contains(github.base_ref, 'release/') || contains(inputs.release_tag, '-rc') }}
+        working-directory: main
+        run: |
+          poetry run pip install psycopg2-binary==2.9.1
+
+      - name: Restore PostgreSQL Latest
+        if: ${{ github.base_ref == 'develop' }}
+        working-directory: main
+        run: |
+          docker compose -f ./database_snapshots/docker-compose.yml cp postgres-latest.tar dbs_postgres:/opt/postgres-latest.tar
+          docker compose \
+          -f ./database_snapshots/docker-compose.yml exec \
+          -T dbs_postgres /bin/bash \
+          -c '/opt/cloudbolt/appliances/docker-compose/container_scripts/wait-for-it.sh -h dbs_postgres -p 5432 -t 60; export PGPASSWORD=dbsnap_pass;/usr/bin/pg_restore -U cb_dba -e -w --clean --if-exists -d cloudbolt /opt/postgres-latest.tar'
+
+      - name: Restore PostgreSQL Latest-RC
+        if: ${{ contains(github.base_ref, 'release/') }}
+        continue-on-error: true
+        working-directory: main
+        run: |
+          docker compose -f ./database_snapshots/docker-compose.yml cp postgres-latest-rc.tar dbs_postgres:/opt/postgres-latest.tar
+          docker compose \
+          -f ./database_snapshots/docker-compose.yml exec \
+          -T dbs_postgres /bin/bash \
+          -c '/opt/cloudbolt/appliances/docker-compose/container_scripts/wait-for-it.sh -h dbs_postgres -p 5432 -t 60; export PGPASSWORD=dbsnap_pass;/usr/bin/pg_restore -U cb_dba -e -w --clean --if-exists -d cloudbolt /opt/postgres-latest.tar'
+
+      - name: Run PostgreSQL Database Migrations
+        working-directory: main
+        run: |
+          ./database_snapshots/run_postgres_migrations.sh
+
+      - name: Backup PostgreSQL Database
+        working-directory: main
+        run: |
+          docker compose -f ./database_snapshots/docker-compose.yml exec \
+          -T dbs_postgres /bin/bash \
+          -c '/opt/cloudbolt/appliances/docker-compose/container_scripts/wait-for-it.sh -h dbs_postgres -p 5432 -t 60; export PGPASSWORD=dbsnap_pass;/usr/bin/pg_dump -U cb_dba -w --clean -F t -f /backup.tar cloudbolt'
+          DBID=$(docker compose -f ./database_snapshots/docker-compose.yml ps -q dbs_postgres)
+          docker cp $DBID:/backup.tar ${{ inputs.postgres }}
+          docker compose -f ./database_snapshots/docker-compose.yml exec -T dbs_postgres /bin/bash -c 'rm -rf /backup.tar'
+
+      - name: Upload PostgreSQL Database Backup to s3
+        if: ${{ contains(inputs.release_tag, 'develop') != 'true' }}
+        working-directory: main
+        run: |
+          aws s3 cp --quiet ./${{ inputs.postgres }} s3://${{ env.BUCKET }}/${{ inputs.release_tag }}/${{ inputs.postgres }}
+
+      - name: Upload PostgreSQL Database Backup to s3 latest
+        if: ${{ contains(inputs.release_tag, 'develop') }}
+        working-directory: main
+        run: |
+          aws s3 cp --quiet ./${{ inputs.postgres }} s3://${{ env.BUCKET }}/latest/postgres-latest.tar
+
+      - name: Upload PostgreSQL Database Backup to s3 latest-rc
+        if: ${{ contains(inputs.release_tag, '-rc') }}
+        working-directory: main
+        run: |
+          VERSION=$(echo "${{ inputs.release_tag }}" | cut -d '-' -f1)
+          aws s3 cp --quiet ./${{ inputs.postgres }} s3://${{ env.BUCKET }}/latest/postgres-$VERSION-latest-rc.tar
+
+      - name: Output PostgreSQL Snapshot S3 Location Latest
+        if: ${{ contains(inputs.release_tag, 'develop') }}
+        id: output-postgres-ss-s3-location-latest
+        working-directory: main
+        run: |
+          echo "postgres-ss-s3-location-latest=s3://${{ env.BUCKET }}/latest/postgres-latest.tar" >> $GITHUB_OUTPUT
+
+      - name: Output PostgreSQL Snapshot S3 Location
+        if: ${{ contains(inputs.release_tag, 'develop') != 'true' && contains(inputs.release_tag, 'rc') != 'true' }}
+        id: output-postgres-ss-s3-location
+        working-directory: main
+        run: |
+          echo "postgres-ss-s3-location=s3://${{ env.BUCKET }}/${{ inputs.release_tag }}/${{ inputs.postgres }}" >> $GITHUB_OUTPUT
+
+      - name: Output PostgreSQL Snapshot S3 Location
+        if: ${{ contains(inputs.release_tag, 'rc') == 'true' }}
+        id: output-postgres-ss-s3-location-latest-rc
+        working-directory: main
+        run: |
+          VERSION=$(echo "${{ inputs.release_tag }}" | cut -d '-' -f1)
+          echo "postgres-ss-s3-location=s3://${{ env.BUCKET }}/latest/postgres-$VERSION-latest-rc.tar" >> $GITHUB_OUTPUT
+
+
+      - name: Run Docker Compose Down
+        if: always()
+        working-directory: main
+        run: |
+          docker compose -f ./database_snapshots/docker-compose.yml down

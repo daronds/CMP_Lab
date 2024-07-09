@@ -1,0 +1,18 @@
+[
+  {
+    "path": "15-kubernetes/kubectl_v1.25.4",
+    "size": 45015040
+  },
+  {
+    "path": "15-kubernetes/rke_v0.3.2",
+    "size": 44530041
+  },
+  {
+    "path": "15-terraform/terraform_0.13.5_linux_amd64.zip",
+    "size": 34880173
+  },
+  {
+    "path": "15-terraform/terraform_0.13.5",
+    "size": 85545059
+  }
+]

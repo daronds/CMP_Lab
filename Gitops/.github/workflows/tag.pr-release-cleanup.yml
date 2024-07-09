@@ -1,0 +1,33 @@
+---
+name: 003 PR Release Cleanup
+on:
+  pull_request:
+    types:
+      - closed
+jobs:
+  tag:
+    name: Increment Tag
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    steps:
+      - uses: actions/checkout@v4.1.1
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Clean up closed PR Releases
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh api repos/:owner/:repo/tags 
+          --paginate 
+          --jq '.[] | select(.name | contains("-PR${{ github.event.number }}")).name'
+          | sort --version-sort
+          | xargs --verbose -I{} sh -c 'gh release delete {} --yes && git push --delete origin {}'

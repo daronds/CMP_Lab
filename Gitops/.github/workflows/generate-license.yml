@@ -1,0 +1,64 @@
+name: Generate License
+
+on:
+  workflow_dispatch:
+    inputs:
+      expiration-date:
+        description: YYYY-MM-DD
+        default: ""
+        required: true
+      max-servers:
+        required: true
+      output-file:
+        default: "license.bin"
+        required: true
+      enable-arguments:
+        default: "--enable-all"
+      company:
+        required: true
+      license-type:
+        default: CloudBolt
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  generate-license:
+    name: Generate License
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+
+    steps:
+      - uses: actions/checkout@v4.1.1
+
+      - name: Echo Event
+        run: echo '${{ toJson(github.event) }}'
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+
+      - uses: ./.github/actions/poetry-install
+
+      - name: Generate License
+        id: generate-license
+        run: >
+          poetry run ./tools/generate_license.py
+          --output-file '${{github.event.inputs.output-file}}'
+          ${{github.event.inputs.enable-arguments}}
+          --max-servers ${{ github.event.inputs.max-servers }}
+          --expiration-date '${{ github.event.inputs.expiration-date }}'
+          --company '${{ github.event.inputs.company}}'
+          --license-type '${{github.event.inputs.license-type}}'
+
+      - uses: actions/upload-artifact@v4
+        id: upload-artifact
+        with:
+          name: "license.bin"
+          path: ./${{github.event.inputs.output-file}}

@@ -1,0 +1,41 @@
+name: 011 Pull Request Analysis
+on:
+  pull_request:
+  push:
+    branches:
+      - develop
+permissions: write-all
+jobs:
+  javascript-checks:
+    name: Javascript Checks
+    uses: ./.github/workflows/javascript_pra.yaml
+    secrets: inherit
+  unit-tests:
+    name: Unit Tests
+    uses: ./.github/workflows/unit_tests.yaml
+    with:
+      full-crypto-flag: false
+    secrets: inherit
+    concurrency:
+      group: unit-tests-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
+  consolidated-unit-tests:
+    name: Consolidated Unit Tests
+    uses: ./.github/workflows/other_unit_tests.yaml
+    with:
+      full-crypto-flag: false
+    secrets: inherit
+    concurrency:
+      group: other-unit-tests-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
+  check-migrations:
+    name: Check Migrations
+    uses: ./.github/workflows/migrations.yaml
+    secrets: inherit
+  python-linting:
+    name: Black and Flake8
+    uses: ./.github/workflows/python-linting-formatting.yml
+    secrets: inherit
+  codecov-validation:
+    name: Codecov Validation
+    uses: ./.github/workflows/codecov-validation.yml

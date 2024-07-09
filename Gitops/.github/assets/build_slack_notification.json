@@ -1,0 +1,69 @@
+{
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": ":cloudbolt::onefuse: $CB_RELEASE is here :meow_party:",
+        "emoji": true
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*To upgrade your CIT*: ```storm deploy cit upgrade s3://$BUCKET/$VERSION/$UPGRADER_BASENAME <CIT IP ADDRESS>``` \n *To install Storm:* ``` aws s3 cp s3://cb-storm/storm /usr/local/bin/storm && chmod +x /usr/local/bin/storm ```"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Installer*\n - s3://$BUCKET/$VERSION/$INSTALLER_BASENAME\n*Checksum* \n - s3://$BUCKET/$VERSION/$INSTALLER_BASENAME.sha256sum \n - s3://$BUCKET/$VERSION/$INSTALLER_BASENAME.md5sum"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Upgrader*\n - s3://$BUCKET/$VERSION/$UPGRADER_BASENAME\n*Checksum* \n - s3://$BUCKET/$VERSION/$UPGRADER_BASENAME.sha256sum \n - s3://$BUCKET/$VERSION/$INSTALLER_BASENAME.md5sum"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*params.json*\n s3://$BUCKET/$VERSION/params_$CB_BUILD.json"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "image",
+          "image_url": "https://pbs.twimg.com/profile_images/625633822235693056/lNGUneLX_400x400.jpg",
+          "alt_text": "cute cat"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "This is an internal only release candidate"
+        }
+      ]
+    }
+  ]
+}

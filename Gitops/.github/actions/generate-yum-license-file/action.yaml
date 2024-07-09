@@ -1,0 +1,64 @@
+name: Generate Yum Licenses File
+description: Build full cloudbolt image with apache and systemd
+inputs:
+  image-tag:
+    required: true
+outputs:
+  licenses:
+    description: Yum licenses file
+    value: ${{ steps.set-outputs.outputs.licenses }}
+  security:
+    description: Yum Security Alerts
+    value: ${{ steps.set-outputs.outputs.security }}
+runs:
+  using: "composite"
+  steps:
+    - name: ECR Login
+      shell: bash -leo pipefail {0}
+      run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 499620025628.dkr.ecr.us-east-1.amazonaws.com
+
+    - name: Docker Build
+      shell: bash -leo pipefail {0}
+      run: |
+        docker pull ${{ inputs.image-tag }}
+
+    - name: Start Container
+      shell: bash -leo pipefail {0}
+      run: |
+        docker rm -f cloudbolt_yum || true
+        docker run --name cloudbolt_yum --privileged -v /sys/fs/cgroup:/sys/fs/cgroup:ro -d -i -t ${{ inputs.image-tag }} /usr/sbin/init
+
+    - name: Install Jq
+      shell: bash -leo pipefail {0}
+      run: |
+        docker exec \
+        --privileged \
+        cloudbolt_yum \
+        /bin/bash -c \
+        "yum install -y jq"
+
+    - name: Generate Licenses 
+      id: licenses
+      shell: bash -leo pipefail {0}
+      run: |
+        docker exec \
+        --privileged \
+        cloudbolt_yum \
+        /bin/bash -c \
+        "rpm -qa --queryformat \"\[\"%{NAME:shescape}\", \"%{LICENSE:shescape}\", \"%{VERSION:shescape}\" \]\n\" | tr \"'\" '\"' | jq -s -c '.' > /tmp/yum-licenses.json"
+
+    - name: Copy Licenses
+      shell: bash -leo pipefail {0}
+      id: copy-licenses
+      run: docker cp cloudbolt_yum:/tmp/yum-licenses.json ./yum-licenses.json
+
+
+    - name: Set Outputs
+      shell: bash -leo pipefail {0}
+      id: set-outputs
+      run: | 
+        echo "::set-output name=licenses::$(cat yum-licenses.json)"
+
+    - name: Stop Container
+      shell: bash -leo pipefail {0}
+      run: docker rm -f cloudbolt_yum || true

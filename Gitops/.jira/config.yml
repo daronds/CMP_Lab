@@ -1,0 +1,16 @@
+deployments:
+  environmentMapping:
+    testing:
+      - "Smoke Tests"
+    staging:
+      - "staging"
+      - "OL8 OVA Build"
+      - "OL8 OVA Verification"
+      - "EL7 OVA Build"
+      - "EL7 OVA Verification"
+      - "OL8 AMI BUILD"
+    production:
+      - "Production"
+      - "CMP Internal Production"
+      - "Production Pending Deployment"
+      - "downloads.cloudbolt.io"

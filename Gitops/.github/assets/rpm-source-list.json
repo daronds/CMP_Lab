@@ -1,0 +1,1208 @@
+{
+  "Dependencies": [
+    {
+      "package": "alsa-lib",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "apr",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "apr-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "apr-util",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "apr-util-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "audit",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "audit-libs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "autoconf",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "automake",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "avahi-libs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "bzip2-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "ca-certificates",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "cairo",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "cairo-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "checkpolicy",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "clamav",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "clamav-data",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "clamav-devel",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "clamav-filesystem",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "clamav-lib",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "clamav-scanner-systemd",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "clamav-server",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "clamav-server-systemd",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "clamav-update",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "cloudbolt-python3",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "cpp",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "curl",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "cyrus-sasl",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "cyrus-sasl-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "cyrus-sasl-lib",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "dbus",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "dbus-libs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "dejavu-fonts-common",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "dejavu-sans-fonts",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "dejavu-sans-mono-fonts",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "e2fsprogs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "e2fsprogs-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "e2fsprogs-libs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "epel-release",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "expat",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "expat-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "flac-libs",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "fontconfig",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "fontconfig-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "fontpackages-filesystem",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "freerdp-libs",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "freetype",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "freetype-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "fribidi",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "fribidi-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "gcc",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "gcc-c++",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "git",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "glib2",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "glib2-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "glibc",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "glibc-common",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "glibc-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "glibc-headers",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "gl-manpages",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "gnutls",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "google-cloud-cli",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "graphite2",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "graphite2-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "gsm",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "guacd",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "harfbuzz",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "harfbuzz-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "harfbuzz-icu",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "httpd",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "httpd-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "httpd-tools",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "ipmitool",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "kernel-headers",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "keyutils-libs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "keyutils-libs-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "krb5-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "krb5-libs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "krb5-workstation",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "kubectl",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libaio",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libaio-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libasyncns",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libblkid",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libcgroup",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libcom_err",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libcom_err-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libcurl",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libcurl-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libdb",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libdb-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libdrm",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libdrm-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libevent",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libffi",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libffi-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libgcc",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libgcrypt",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libgcrypt-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libglvnd",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libglvnd-core-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libglvnd-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libglvnd-egl",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libglvnd-gles",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libglvnd-glx",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libglvnd-opengl",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libgomp",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libgpg-error",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libgpg-error-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libguac",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libguac-client-rdp",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libguac-client-ssh",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libguac-client-telnet",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libguac-client-vnc",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libguac-devel",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libICE",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libicu",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libicu-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libidn",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libjpeg-turbo",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libjpeg-turbo-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libkadm5",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libmount",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libmpc",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libnghttp2",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libogg",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libogg-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libpng",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libpng-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libselinux",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libselinux-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libselinux-utils",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libsepol",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libsepol-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libSM",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libsmartcols",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libsndfile",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libss",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libssh2",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libssh2-devel",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libstdc++",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libstdc++-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libtdb",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libtelnet",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libtelnet-devel",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libthai",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libtool-ltdl",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libuuid",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libuuid-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libverto",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libverto-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libvncserver",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libvncserver-devel",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libvorbis",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libvorbis-devel",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "libwayland-client",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libwayland-server",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libwebp",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libX11",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libX11-common",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libX11-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXau",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXau-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libxcb",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libxcb-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXdamage",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXdamage-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXext",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXext-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXfixes",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXfixes-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXft",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXft-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXi",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libxkbfile",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libxml2",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libXrender",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXrender-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libxshmfence",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libxslt",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "libxslt-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXtst",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXxf86vm",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "libXxf86vm-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "logrotate",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "lzo-minilzo",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "m4",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "mailcap",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "memcached",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "mesa-libEGL",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "mesa-libEGL-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "mesa-libgbm",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "mesa-libGL",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "mesa-libglapi",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "mesa-libGL-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "mod_qos",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "mod_ssl",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "mpfr",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "ncurses",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "ncurses-base",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "ncurses-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "ncurses-libs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "nettle",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "net-tools",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "nmap",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "nspr",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "nspr-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "nss",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "nss-softokn",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "nss-softokn-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "nss-softokn-freebl",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "nss-softokn-freebl-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "nss-util",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "nss-util-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "numactl",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "numactl-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "numactl-libs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "openldap",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "openldap-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "openssl",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "openssl-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "openssl-libs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "orc",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "pango",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "pango-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "pcre",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "pcre-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "perl-Carp",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-constant",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Data-Dumper",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Encode",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Error",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "perl-Exporter",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-File-Path",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-File-Temp",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Filter",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "perl-Getopt-Long",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Git",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "perl-HTTP-Tiny",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-libs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-macros",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-parent",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-PathTools",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Pod-Escapes",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-podlators",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Pod-Perldoc",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Pod-Simple",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Pod-Usage",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Scalar-List-Utils",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Socket",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Storable",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-TermReadKey",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "perl-Test-Harness",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "perl-Text-ParseWords",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Thread-Queue",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "perl-threads",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-threads-shared",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "perl-Time-HiRes",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "perl-Time-Local",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "pixman",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "pixman-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "policycoreutils",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "policycoreutils-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "policycoreutils-python-utils",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "postgresql14",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "postgresql14-server",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "pulseaudio",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "pulseaudio-libs",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "pulseaudio-utils",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "python3-libselinux",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "python3-libxml2",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "readline",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "readline-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "rsync",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "rtkit",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "scl-utils",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "selinux-policy",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "selinux-policy-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "selinux-policy-targeted",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "socat",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "speex",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "sqlite",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "sqlite-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "sshpass",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "sudo",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "tcp_wrappers",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "tcp_wrappers-libs",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "trousers",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "tzdata",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "util-linux",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "uuid",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "webrtc-audio-processing",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "xmlsec1",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "xmlsec1-devel",
+      "repository": "cloudbolt-software-cmp"
+    },
+    {
+      "package": "xmlsec1-openssl",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "xorg-x11-proto-devel",
+      "repository": "rhel-8-for-x86_64-appstream-rpms"
+    },
+    {
+      "package": "xz-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "xz-libs",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "zlib",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    },
+    {
+      "package": "zlib-devel",
+      "repository": "rhel-8-for-x86_64-baseos-rpms"
+    }
+  ]
+}

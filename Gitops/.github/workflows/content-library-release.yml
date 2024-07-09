@@ -1,0 +1,80 @@
+name: Create a Release of content-library
+# Tests, builds the vue app, bundles it into a xui, creates a release, uploads the xui to release, and triggers a publish.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Staging (creates pre-release publishing to Staging bucket) or Production (creates release publishing to Production bucket)
+        default: Staging
+        type: string
+      publish:
+        description: Should the workflow publish the new release to the content library?
+        default: false
+        type: boolean
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Staging (creates pre-release publishing to Staging bucket) or Production (creates release publishing to Production bucket)
+        required: true
+        default: Staging
+        type: choice
+        options:
+          - Staging
+          - Production
+      publish:
+        description: Should the workflow publish the new release to the content library?
+        default: false
+        type: boolean
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  # Sets the content-library repo to generate artifacts and publish the newly create release
+  publish:
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - small
+
+    steps:
+      - name: Generate token for gh cli
+        id: generate-token
+        uses: tibdex/github-app-token@v1.8.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Set content-library ref
+        id: set-content-library-ref
+        run: |
+          if [[ ${{ inputs.environment }} == Production ]]; then
+            echo "CONTENT_LIBRARY_REF=main" >> $GITHUB_OUTPUT
+          else
+            echo "CONTENT_LIBRARY_REF=develop" >> $GITHUB_OUTPUT
+          fi
+      
+      # GitHub Action: return-dispatch
+      - name: Kick off content-library workflow
+        uses: codex-/return-dispatch@v1
+        id: return_dispatch
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          ref: ${{ steps.set-content-library-ref.outputs.CONTENT_LIBRARY_REF }}
+          repo: content-library
+          owner: CloudBoltSoftware
+          workflow: generate-artifacts.yml
+          workflow_inputs: '{ "publish": "${{ inputs.publish }}", "environment": "${{ inputs.environment }}" }'
+
+      - name: Watch generate-artifacts run
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          RUN_ID=${{steps.return_dispatch.outputs.run_id}}
+          gh run watch $RUN_ID --repo cloudboltsoftware/content-library
+

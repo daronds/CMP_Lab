@@ -1,0 +1,35 @@
+name: Jira Create Issue
+description: Create Issue
+inputs:
+  jira-token:
+    required: true
+  jira-user:
+    required: true
+  summary:
+    required: true
+  issue-type:
+    default: 10110
+  project:
+    default: 10027
+  description:
+    required: true
+  labels:
+    default: '["vulnerability", "SECURITY_SCAN"]'
+runs:
+  using: "composite"
+  steps:
+    - name: Create Jira Issue
+      id: create-jira-issue
+      shell: bash -leo pipefail {0}
+      run: |
+        PAYLOAD='{"fields":{"summary":"${{ inputs.summary }}", "customfield_10115": { "id": "24281" }, "issuetype":{"id":"${{ inputs.issue-type }}"},"project":{"id":"${{ inputs.project }}"},"description":${{ inputs.description }},"labels":${{ inputs.labels }}}}'
+
+        echo "$PAYLOAD" | jq . > payload.json
+        curl --request POST \
+          -S \
+          --url 'https://cloudbolt.atlassian.net/rest/api/3/issue' \
+          --user '${{ inputs.jira-user }}:${{ inputs.jira-token }}' \
+          --header 'Accept: application/json' \
+          --header 'Content-Type: application/json' \
+          --data @payload.json \
+        | jq .

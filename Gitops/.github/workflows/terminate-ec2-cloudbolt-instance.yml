@@ -1,0 +1,58 @@
+name: Terminate EC2 CloudBolt Instance
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: |
+            The environment where the EC2 instance exists
+        required: true
+        type: string
+      instance_id:
+        description: AMI ID of the CloudBolt AMI
+        required: true
+        type: string
+      launch_template_name:
+        description: Name of the EC2 launch template
+        required: true
+        type: string
+      create_snapshot_before_terminate:
+        required: false
+        default: true
+        type: boolean
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  terminate-ec2-cloudbolt-instance:
+    name: Terminate EC2 CloudBolt Instance
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - large
+    outputs:
+      ip_address: ${{ steps.terminate-ec2-instance.outputs.ip_address }}
+      instance_id: ${{ steps.terminate-ec2-instance.outputs.instance_id }}
+    environment:
+      name: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4.1.1
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ vars.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: 'us-east-1'
+          role-skip-session-tagging: true
+
+      - name: Terminate EC2 Instance
+        id: terminate-ec2-instance
+        uses: CloudBoltSoftware/launch-ec2-template-action@v1.3.2
+        with:
+          launch_template_name: ${{ inputs.launch_template_name }}
+          aws_region: ${{ vars.AWS_REGION }}
+          create_snapshot_before_terminate: ${{ inputs.create_snapshot_before_terminate }}
+          terminate: 'true'
+          instance_id: ${{ inputs.instance_id }}

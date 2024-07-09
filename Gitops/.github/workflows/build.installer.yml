@@ -1,0 +1,690 @@
+name: 002 Build Installer and Upgrader
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        description: Release tag to use for the installer and upgrader
+        required: true
+      make-cmp-setup-ui-distro-package-path:
+        type: string
+        description: Path to the CMP Setup UI artifact
+        required: true
+      postgres-ss-s3-location-latest:
+        type: string
+        description: S3 location of the latest PostgreSQL snapshot
+        required: true
+      postgres-ss-s3-location:
+        type: string
+        description: S3 location of the PostgreSQL snapshot for the release tag
+        required: true
+      short_sha:
+        type: string
+        description: Short SHA of the commit
+        required: true
+      minimal_repo_artifact:
+        type: string
+        description: S3 location of the minimal dnf airgapped repo artifact
+        required: true
+      onefuse-ui-version:
+        type: string
+        description: OneFuse UI version
+        default: latest
+    outputs:
+      short_sha:
+        value: ${{ inputs.short_sha }}
+      installer_location:
+        value: ${{ jobs.build-upgrader-and-installer.outputs.installer_location }}
+      installer_presigned_url:
+        value: ${{ jobs.build-upgrader-and-installer.outputs.installer_presigned_url }}
+      upgrader_location:
+        value: ${{ jobs.build-upgrader-and-installer.outputs.upgrader_location }}
+      upgrader_presigned_url:
+        value: ${{ jobs.build-upgrader-and-installer.outputs.upgrader_presigned_url }}
+
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
+jobs:
+  build-upgrader-and-installer:
+    name: Build Upgrader and Installer
+    env:
+      BUCKET: cb-internal-builds
+    runs-on:
+      - self-hosted
+      - oracle-linux-8
+      - m7a-large
+    outputs:
+      installer_location: ${{ steps.generate-s3-path.outputs.installer }}
+      upgrader_location: ${{ steps.generate-s3-path.outputs.upgrader }}
+      packer_params_location: ${{ steps.generate-packer-params.outputs.s3 }}
+      tag: ${{ inputs.release_tag }}
+      upgrader_presigned_url: ${{ steps.output-upgrader-presigned-url.outputs.upgrader_presigned_url }}
+      installer_presigned_url: ${{ steps.output-installer-presigned-url.outputs.installer_presigned_url }}
+    permissions: write-all
+    steps:
+      - name: Add /usr/local/bin to PATH
+        run: |
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Generate token
+        id: generate-token
+        uses: tibdex/github-app-token@v2.1.0
+        with:
+          app_id: 175452
+          private_key: ${{ secrets.CLOUDBOLT_ACTION_HELPER_PEM }}
+
+      - name: Clean working directory
+        run: |
+          rm -rf /opt/action-runner/_work/cloudbolt/cloudbolt
+
+      - uses: actions/checkout@v4.1.1
+        with:
+          path: main
+          submodules: "recursive"
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Download and Install Binaries for Third Party Tools
+        working-directory: main/cloudbolt_installer
+        run: |
+          dnf -y install wget unzip tree --repo=ol8_baseos_latest
+          bash get_binaries_for_external_packages.sh
+          tree
+
+      - name: Download Gulp Build
+        uses: actions/download-artifact@v4
+        with:
+          name: gulp-build
+          path: main/
+
+      - name: Extract Gulp Build
+        working-directory: main
+        run: |
+          tar -xzvf gulp-build.tgz
+          ls ./src/static
+
+      - name: Download CMP Setup Distro Pkg
+        id: download-cmp-setup-ui
+        uses: actions/download-artifact@v4
+        with:
+          name: cmp_setup_ui_distro_pkg
+
+      - name: Move CMP Setup Distro Pkg
+        run: |
+          mkdir -p $(dirname ${{ inputs.make-cmp-setup-ui-distro-package-path }})
+          mv -f cmp_setup_ui_*.tgz ${{ inputs.make-cmp-setup-ui-distro-package-path }}
+
+      - name: Select latest OneFuses Release
+        id: latest-onefuse-release
+        if: ${{ inputs.onefuse-ui-version == 'latest' }}
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          LATEST_ONEFUSE_RELEASE=$(gh release list --repo cloudboltsoftware/voltron-ui --exclude-pre-releases --limit 1 | awk '{print $1}')
+          echo "latest-onefuse-release=$LATEST_ONEFUSE_RELEASE" >> $GITHUB_OUTPUT
+          echo "latest-onefuse-release=$LATEST_ONEFUSE_RELEASE" >> $GITHUB_STEP_SUMMARY
+
+      - name: Make OneFuse UI Distro Package Path
+        run: |
+          mkdir -p $(dirname /opt/actions-runner/_work/cloudbolt/cloudbolt/cloudbolt_build/fuse_ui/distro_package/)
+
+      - name: Download Voltron UI Distro Pkg
+        id: download-onefuse-ui-distro-package-pkg
+        working-directory: main/cloudbolt_installer
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: >
+          gh release download ${{ steps.latest-onefuse-release.outputs.latest-onefuse-release || inputs.onefuse-ui-version }}
+          --repo cloudboltsoftware/voltron-ui
+          --pattern "fuse-ui-*.tgz"
+
+      - name: Download Vue Pkg
+        id: download-cmp-vue-pkg
+        uses: actions/download-artifact@v4
+        with:
+          name: vue_build
+
+      - name: Move CMP Vue Package
+        run: |
+          mkdir -p ./main/src/static/js
+          tar -xf vue_build.tgz -C ./main/src/static/js
+          ls ./main/src/static/js/vue
+
+      - name: Download Vue 3 Pkg
+        id: download-cmp-vue-3-pkg
+        uses: actions/download-artifact@v4
+        with:
+          name: vue3_build
+
+      - name: Move CMP Vue 3 Package
+        run: |
+          mkdir -p ./main/src/static/js
+          tar -xf vue3_build.tgz -C ./main/src/static/js
+          ls ./main/src/static/js/vue3
+
+      - name: Check All Downloaded Packages Exist
+        working-directory: main
+        run: |
+          [ -d "./src/static/js" ] && echo "Directory ./src/static/js exists"
+          [ -d "./src/static/js/vue" ] && echo "Directory ./src/static/js/vue exists"
+          [ -d "./src/static/js/vue3" ] && echo "Directory ./src/static/js/vue3 exists"
+          [ -f "./src/static/js/gulp-bundle.js" ] && echo "File ./src/static/js/gulp-bundle.js exists"
+          [ -f "./src/static/js/c2.min.js" ] && echo "File ./src/static/js/c2.min.js exists"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ./main/.nvmrc
+
+      - name: Read Build Facts
+        id: read-build-facts
+        working-directory: main
+        run: |
+          echo "branch=${{ inputs.release_tag }}" >> $GITHUB_OUTPUT
+          echo "company=$(cat ./COMPANY)" >> $GITHUB_OUTPUT
+          echo "version=$(cat ./VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Clear rpms from ./cloudbolt_installer/01-all-yum-pkgs/
+        working-directory: main
+        run: |
+          rm -rf ./cloudbolt_installer/01-all-yum-pkgs/*.rpm
+
+      - name: 'Split tag on -'
+        id: split-tag
+        run: |
+          echo "version=$( echo '${{ inputs.release_tag }}' | cut -d '-' -f1 )" >> $GITHUB_OUTPUT
+          echo "release=$( echo '${{ inputs.release_tag }}' | cut -d '-' -f2 )" >> $GITHUB_OUTPUT
+
+      - name: Ensure Correct RPMs
+        working-directory: main
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          ASSETS=$(gh release view ${{ inputs.release_tag }} --json assets)
+          echo "Assets: $ASSETS"
+          for asset_name in $(echo "$ASSETS" | jq -r '.assets[] | select(.name | endswith(".rpm") and contains("${{ steps.split-tag.outputs.version }}${{ steps.split-tag.outputs.release != '' && '.'}}${{ steps.split-tag.outputs.release }}") | not) | .name'); do
+            echo "Deleting asset: $asset_name"
+            gh release delete-asset ${{ inputs.release_tag }} "$asset_name" --yes
+          done
+
+      - name: Download RPMs
+        working-directory: main
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          release_tag_prefix=$(echo "${{ inputs.release_tag }}" | cut -d'-' -f1)
+          gh release download ${{ inputs.release_tag }} --pattern "cloudbolt-${release_tag_prefix}.*.rpm" --dir ./cloudbolt_installer/01-all-yum-pkgs/
+
+      - name: Download Airgapped DNF Repo
+        working-directory: main
+        run: |
+          aws s3 cp --quiet ${{ inputs.minimal_repo_artifact }} ./cloudbolt_installer/01-all-yum-pkgs/minimal-local-dnf-repo.tgz
+
+      - name: Download Initial PostgreSQL Database Snapshot
+        if: ${{ contains(inputs.release_tag, 'develop') }}
+        working-directory: main
+        run: |
+          aws s3 cp --quiet ${{ inputs.postgres-ss-s3-location-latest }} ./cloudbolt_installer/09-postgresql/initial_postgres_snapshot.tar
+
+      - name: Download Initial PostgreSQL Database Snapshot
+        if: ${{ contains(inputs.release_tag, 'rc') == true }}
+        working-directory: main
+        run: |
+          aws s3 cp --quiet ${{ inputs.postgres-ss-s3-location }} ./cloudbolt_installer/09-postgresql/initial_postgres_snapshot.tar
+
+      - name: Download Initial PostgreSQL Database Snapshot
+        if: ${{ contains(inputs.release_tag, 'develop') != true && contains(inputs.release_tag, 'rc') != true }}
+        working-directory: main
+        run: |
+          aws s3 cp --quiet ${{ inputs.postgres-ss-s3-location }} ./cloudbolt_installer/09-postgresql/initial_postgres_snapshot.tar
+
+      - name: Generate Short Sha
+        id: generate-short-sha
+        working-directory: main
+        run: |
+          echo "short-sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Generate Release Date
+        id: generate-release-date
+        run: |
+          echo "release-date=$(date '+%Y-%m-%d') " >> $GITHUB_OUTPUT
+
+      - name: Format Tag as Version
+        id: format-tag-as-version
+        uses: ./main/.github/actions/strip-version-action
+        with:
+          version: ${{ inputs.release_tag }}
+
+      - name: Generate Settings File
+        working-directory: main/src
+        run: |
+          sed -i -e "s/\"VERSION\": \".*\"/\"VERSION\": \"${{ steps.format-tag-as-version.outputs.version }}\"/g" ./settings.py
+          sed -i -e "s/\"BUILD\": \".*\"/\"BUILD\": \"${{ steps.generate-short-sha.outputs.short-sha }}\"/g" ./settings.py
+          sed -i -e "s/\"RELEASE_DATE\": \".*\"/\"RELEASE_DATE\": \"${{ steps.generate-release-date.outputs.release-date }}\"/g" ./settings.py
+          echo "::group::Log settings.py"
+          cat ./settings.py
+          echo "::endgroup::"
+
+      - name: Create Installer Build Root
+        working-directory: main/cloudbolt_installer
+        id: create-build-root
+        run: |
+          cd ../../
+          mkdir -p cloudbolt_build/build_temp/installer
+          mkdir -p cloudbolt_build/build_temp/upgrader
+          mkdir -p cloudbolt_build/build_package
+          mkdir -p cloudbolt_build/distro_package
+          cd cloudbolt_build
+          echo "build-root=$(pwd)" >> $GITHUB_OUTPUT
+
+      - name: Check Distro $ACTION support
+        id: check-action-support
+        continue-on-error: true
+        working-directory: main/src/dev_tools
+        run: |
+          grep '$ACTIONS' < ./make_distro_package.sh
+
+      - name: Make CloudBolt Distro
+        if: steps.check-action-support.outcome == 'success'
+        working-directory: main/src/dev_tools
+        run: |
+          ./make_distro_package.sh -b ${{ steps.create-build-root.outputs.build-root }} -a | tee /tmp/make_distro_package.out
+
+      - name: Output Distro Package
+        id: output-distro-package
+        run: |
+          echo "distro_pkg=$(tail -1 /tmp/make_distro_package.out)" >> $GITHUB_OUTPUT
+          echo "cmp_setup_ui_distro_pkg=${{ inputs.make-cmp-setup-ui-distro-package-path }}" >> $GITHUB_OUTPUT
+          echo "onefuse_ui_distro_pkg=/opt/actions-runner/_work/cloudbolt/cloudbolt/cloudbolt_build/fuse_ui/distro_package/" >> $GITHUB_OUTPUT
+
+      - name: Generate RELEASE file
+        working-directory: main/cloudbolt_installer
+        run: |-
+          echo 'pkg_build_date="${{ steps.generate-release-date.outputs.release-date }}"' > ./RELEASE
+          echo 'version="${{ steps.format-tag-as-version.outputs.version }}"' >> ./RELEASE
+          echo 'build="${{ steps.generate-short-sha.outputs.short-sha }}"' >> ./RELEASE
+          cat ./RELEASE
+
+      - name: Copy Installer tree
+        working-directory: main/cloudbolt_installer
+        env:
+          comptype: installer
+          pkg_base_dir: cloudbolt_installer_${{ inputs.release_tag }}
+        run: |
+          eval find . | cpio --quiet -pudm ${{ steps.create-build-root.outputs.build-root }}/build_temp/${{ env.comptype }}/${{ env.pkg_base_dir }}
+
+      - name: Copy Upgrader tree
+        working-directory: main/cloudbolt_installer
+        env:
+          comptype: upgrader
+          pkg_base_dir: cloudbolt_upgrader_${{ inputs.release_tag }}
+        run: |
+          eval find . | cpio --quiet -pudm ${{ steps.create-build-root.outputs.build-root }}/build_temp/${{ env.comptype }}/${{ env.pkg_base_dir }}
+
+      - name: Copy distro_pkgs into installer build tree
+        env:
+          comptype: installer
+        working-directory: main/cloudbolt_installer
+        run: |
+          cp \
+          ${{ steps.output-distro-package.outputs.distro_pkg }} \
+          ${{ steps.create-build-root.outputs.build-root }}/build_temp/${{ env.comptype }}/cloudbolt_installer_${{ inputs.release_tag }}/10-cloudbolt
+
+          cp -r \
+          ${{ inputs.make-cmp-setup-ui-distro-package-path }} \
+          ${{ steps.create-build-root.outputs.build-root }}/build_temp/${{ env.comptype }}/cloudbolt_installer_${{ inputs.release_tag }}/10-cmp-setup-ui
+
+          cp -r \
+          fuse-ui-*.tgz \
+          ${{ steps.create-build-root.outputs.build-root }}/build_temp/${{ env.comptype }}/cloudbolt_installer_${{ inputs.release_tag }}/10-onefuse-ui
+
+      - name: Copy distro_pkgs into upgrader build tree
+        env:
+          comptype: upgrader
+        working-directory: main/cloudbolt_installer
+        run: |
+          cp \
+          ${{ steps.output-distro-package.outputs.distro_pkg }} \
+          ${{ steps.create-build-root.outputs.build-root }}/build_temp/${{ env.comptype }}/cloudbolt_upgrader_${{ inputs.release_tag }}/10-cloudbolt
+
+          cp -r \
+          ${{ inputs.make-cmp-setup-ui-distro-package-path }} \
+          ${{ steps.create-build-root.outputs.build-root }}/build_temp/${{ env.comptype }}/cloudbolt_upgrader_${{ inputs.release_tag }}/10-cmp-setup-ui
+
+          cp -r \
+          fuse-ui-*.tgz \
+          ${{ steps.create-build-root.outputs.build-root }}/build_temp/${{ env.comptype }}/cloudbolt_upgrader_${{ inputs.release_tag }}/10-onefuse-ui
+
+      - name: COPY API Sample into Build Package Dir
+        continue-on-error: true
+        working-directory: main/cloudbolt_installer
+        run: |
+          cp -r \
+          ${{ steps.create-build-root.outputs.build-root }}/distro_build/src/api/static/CloudBolt_API_Samples.zip \
+          ${{ steps.create-build-root.outputs.build-root }}/build_package
+
+      - name: Output Package Names
+        id: output-package-names
+        working-directory: main
+        run: |
+          echo "upgrader=$GITHUB_WORKSPACE/cloudbolt_build/build_package/cloudbolt_upgrader_${{ inputs.release_tag }}.tgz" >> $GITHUB_OUTPUT
+          echo "installer=$GITHUB_WORKSPACE/cloudbolt_build/build_package/cloudbolt_installer_${{ inputs.release_tag }}.tgz" >> $GITHUB_OUTPUT
+
+      - name: Create Tarball of Installer
+        working-directory: ${{ github.workspace }}/cloudbolt_build/build_temp/installer
+        run: |
+          tar --exclude='.git' \
+            --exclude='*.pyc' \
+            --exclude='cut_release_and_upgrade_testvms.sh' \
+            --exclude='cut_release.sh' \
+            --exclude='download_mysql.sh' \
+            --exclude='generate_kb_text.sh' \
+            --exclude='post_kb.py' \
+            --exclude='remote_cb_upgrade.sh' \
+            --exclude='shipit.sh' \
+            --exclude='upload_release.sh' \
+            --exclude='vimcut.sh' \
+            --exclude='yum_freeze.sh' \
+            --exclude='yum_update_from_requirements.sh' \
+            --exclude='04-python-pkgs/devrequirements.txt' \
+            --exclude='04-python-pkgs/README.md' \
+            --exclude='04-python-pkgs/poetry.lock' \
+            --exclude='04-python-pkgs/pyproject.toml' \
+            --exclude='04-python-pkgs/scripts' \
+            --exclude='04-python-pkgs/vendored/unpacked' \
+            --exclude='build_up_and_in_packages.sh' \
+            --exclude='upgrade_cloudbolt.sh' \
+            --dereference \
+            -czf ${{ steps.output-package-names.outputs.installer }} cloudbolt_installer_${{ inputs.release_tag }}
+
+      - name: Create Tarball of Upgrader
+        working-directory: ${{ github.workspace }}/cloudbolt_build/build_temp/upgrader
+        run: |
+          tar --exclude='.git' \
+            --exclude='*.pyc' \
+            --exclude='cut_release_and_upgrade_testvms.sh' \
+            --exclude='cut_release.sh' \
+            --exclude='download_mysql.sh' \
+            --exclude='generate_kb_text.sh' \
+            --exclude='post_kb.py' \
+            --exclude='remote_cb_upgrade.sh' \
+            --exclude='shipit.sh' \
+            --exclude='upload_release.sh' \
+            --exclude='vimcut.sh' \
+            --exclude='yum_freeze.sh' \
+            --exclude='yum_update_from_requirements.sh' \
+            --exclude='04-python-pkgs/devrequirements.txt' \
+            --exclude='04-python-pkgs/README.md' \
+            --exclude='04-python-pkgs/poetry.lock' \
+            --exclude='04-python-pkgs/pyproject.toml' \
+            --exclude='04-python-pkgs/scripts' \
+            --exclude='04-python-pkgs/vendored/unpacked' \
+            --exclude='build_up_and_in_packages.sh' \
+            --exclude='*install_cloudbolt.sh' \
+            --dereference \
+            -czf ${{ steps.output-package-names.outputs.upgrader }} cloudbolt_upgrader_${{ inputs.release_tag }}
+
+
+      - name: Generate Basenames
+        id: generate-basename
+        run: |
+          echo "upgrader=$(basename ${{ steps.output-package-names.outputs.upgrader }})" >> $GITHUB_OUTPUT
+          echo "installer=$(basename ${{ steps.output-package-names.outputs.installer }})" >> $GITHUB_OUTPUT
+
+      - name: Generate Directory Names
+        id: generate-dir-names
+        run: |
+          echo "upgrader=$(dirname ${{ steps.output-package-names.outputs.upgrader }})" >> $GITHUB_OUTPUT
+          echo "installer=$(dirname ${{ steps.output-package-names.outputs.installer }})" >> $GITHUB_OUTPUT
+
+      - name: Generate Checksums
+        id: generate-checksums
+        working-directory: main
+        run: |
+          pushd ${{ steps.generate-dir-names.outputs.installer }}
+          md5sum ${{ steps.generate-basename.outputs.installer }} >> ${{ steps.generate-basename.outputs.installer }}.md5sum
+          sha256sum ${{ steps.generate-basename.outputs.installer }} >> ${{ steps.generate-basename.outputs.installer }}.sha256sum
+          echo "installer_sha256=$(sha256sum ${{ steps.generate-basename.outputs.installer }})" >> $GITHUB_OUTPUT
+          popd
+          pushd ${{ steps.generate-dir-names.outputs.upgrader }}
+          md5sum ${{ steps.generate-basename.outputs.upgrader }} >> ${{ steps.generate-basename.outputs.upgrader }}.md5sum
+          sha256sum ${{ steps.generate-basename.outputs.upgrader }} >> ${{ steps.generate-basename.outputs.upgrader }}.sha256sum
+          echo "upgrader_sha256=$(sha256sum ${{ steps.generate-basename.outputs.upgrader }})" >> $GITHUB_OUTPUT
+          popd
+
+      - name: Extract Checksums
+        id: extract-checksums
+        working-directory: main
+        run: |
+          upgrader_sha256="$(echo '${{ steps.generate-checksums.outputs.upgrader_sha256 }}' | cut -d " " -f 1)"
+          echo "upgrader_sha256=$upgrader_sha256" >> $GITHUB_OUTPUT
+
+      - name: Generate Installer s3 path
+        id: generate-s3-path
+        working-directory: main
+        run: |
+          echo "installer=s3://${{env.BUCKET}}/${{ steps.format-tag-as-version.outputs.version }}/${{ steps.generate-basename.outputs.installer }}" >> $GITHUB_OUTPUT
+          echo "upgrader=s3://${{env.BUCKET}}/${{ steps.format-tag-as-version.outputs.version }}/${{ steps.generate-basename.outputs.upgrader }}" >> $GITHUB_OUTPUT
+
+      - name: Convert version to dashed minor
+        id: convert-version-to-dashed-minor
+        working-directory: main
+        env:
+          version: ${{ steps.format-tag-as-version.outputs.version }}
+        run: |
+          validate_format() {
+            local input="$1"
+            local regex='^[0-9]{4}-[0-9]+$'
+
+            if [[ $input =~ $regex ]]; then
+                echo "Valid format"
+            else
+                echo "Invalid format"
+            fi
+          }
+          converted_version=$(echo ${version#v} | sed 's/\./-/' | cut -d'.' -f1)
+          validate_format "$converted_version"
+          echo "minor dashed version: $converted_version" >> $GITHUB_STEP_SUMMARY
+          echo "minor_dashed_version=$converted_version" >> $GITHUB_OUTPUT
+
+
+      - name: Generate info.json
+        working-directory: main
+        id: generate-info-json
+        env:
+          RELEASE_NOTES: "https://docs.cloudbolt.io/articles/#!cloudbolt-latest-docs/release-${{ steps.convert-version-to-dashed-minor.outputs.minor_dashed_version }}"
+        run: |
+          # remove filename from sha256sum
+          INFO_JSON=$(cat <<EOF
+          {
+            "version": "${{ steps.format-tag-as-version.outputs.version }}",
+            "build": "${{ steps.generate-short-sha.outputs.short-sha}}",
+            "upgrader": "https://downloads.cloudbolt.io/${{ steps.format-tag-as-version.outputs.version }}/${{ steps.generate-basename.outputs.upgrader }}",
+            "release_notes": "${{ env.RELEASE_NOTES }}",
+            "release_date": "${{ steps.generate-release-date.outputs.release-date }}",
+            "checksum": "${{ steps.extract-checksums.outputs.upgrader_sha256 }}"
+          }
+          EOF
+          )
+          echo "$INFO_JSON" > $GITHUB_WORKSPACE/cloudbolt_build/build_package/info-${{ inputs.release_tag }}.json
+          echo "$INFO_JSON" > $GITHUB_WORKSPACE/cloudbolt_build/build_package/info.json
+          echo "::group::Log info.json"
+          cat $GITHUB_WORKSPACE/cloudbolt_build/build_package/info-${{ inputs.release_tag }}.json
+          echo "::endgroup::"
+          echo "path=$GITHUB_WORKSPACE/cloudbolt_build/build_package/info.json" >> $GITHUB_OUTPUT
+
+      - name: Generate Packer params.json
+        id: generate-packer-params
+        working-directory: main
+        run: |
+          PARAMS_JSON_FILENAME="packer-params-${{ inputs.release_tag }}.json"
+          PARAMS_JSON_PATH="$GITHUB_WORKSPACE/cloudbolt_build/build_package/$PARAMS_JSON_FILENAME"
+          PARAMS_JSON=$(cat <<EOF
+          {
+            "cb_version": "${{ steps.format-tag-as-version.outputs.version }}",
+            "build": "${{ steps.generate-short-sha.outputs.short-sha }}",
+            "ks_path": "ks.cfg",
+            "cb_installer_url": "${{steps.generate-s3-path.outputs.installer}}",
+            "memory": "8192",
+            "product": "CloudBolt",
+            "cpu": "2"
+          }
+          EOF
+          )
+          echo "$PARAMS_JSON" > $PARAMS_JSON_PATH
+          echo "path=$PARAMS_JSON_PATH" >> $GITHUB_OUTPUT
+          echo "filename=$PARAMS_JSON_FILENAME" >> $GITHUB_OUTPUT
+          echo "s3=s3://${{ env.BUCKET }}/${{ steps.format-tag-as-version.outputs.version }}/$PARAMS_JSON_FILENAME" >> $GITHUB_OUTPUT
+
+      - name: Upload Upgrader and Installer to cb-internal-builds
+        run: |
+          aws s3 sync ${{ github.workspace }}/cloudbolt_build/build_package/ s3://cb-internal-builds/${{ steps.format-tag-as-version.outputs.version }}/ --no-progress
+
+      - name: Update latest upgrader package
+        if: ${{ !contains(inputs.release_tag, '-PR') }}
+        run: |
+          aws s3 cp --quiet ${{ steps.output-package-names.outputs.upgrader }} s3://cb-internal-builds/latest/cloudbolt-upgrader-latest.tgz
+
+      - name: Output Upgrader Presigned URL
+        id: output-upgrader-presigned-url
+        run: |
+          echo "upgrader_presigned_url=$(aws s3 presign ${{ steps.generate-s3-path.outputs.upgrader }} --expires-in 604800)" >> $GITHUB_OUTPUT
+
+      - name: Output Installer Presigned URL
+        id: output-installer-presigned-url
+        run: |
+          echo "installer_presigned_url=$(aws s3 presign ${{ steps.generate-s3-path.outputs.installer }} --expires-in 604800)" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          role-to-assume: arn:aws:iam::499620025628:role/github_action_cloudfront_invalidation
+          role-session-name: build-installer-${{ github.run_id }}
+          audience: sts.amazonaws.com
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Clear CloudFront Cache
+        continue-on-error: true
+        run: |
+          aws cloudfront create-invalidation --no-cli-pager --paths '/*' --distribution-id ${{ vars.DOWNLOADS_CLOUDFRONT_ID }}
+
+      - name: Notify Slack
+        working-directory: main
+        if: ${{ success() && contains(inputs.release_tag, '-rc') }}
+        env:
+          BRANCH: ${{ steps.read-build-facts.outputs.branch }}
+          CB_RELEASE: ${{ inputs.release_tag }}
+          VERSION: ${{ steps.format-tag-as-version.outputs.version }}
+          UPGRADER_BASENAME: ${{ steps.generate-basename.outputs.upgrader }}
+          INSTALLER_BASENAME: ${{ steps.generate-basename.outputs.installer }}
+          CB_BUILD: ${{ steps.generate-short-sha.outputs.short-sha }}
+        run: |
+          SLACK_PAYLOAD="$(envsubst < ./.github/assets/build_slack_notification.json)"
+          curl -X POST -H 'Content-type: application/json' \
+          --data "$SLACK_PAYLOAD" \
+          ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Notify Slack of Hotfix
+        working-directory: main
+        if: ${{ success() && contains(inputs.release_tag, '-hotfix') }}
+        env:
+          BRANCH: ${{ inputs.release_tag }}
+          CB_RELEASE: ${{ inputs.release_tag }}
+          VERSION: ${{ inputs.release_tag }}
+          UPGRADER_BASENAME: ${{ steps.generate-basename.outputs.upgrader }}
+          INSTALLER_BASENAME: ${{ steps.generate-basename.outputs.installer }}
+          CB_BUILD: ${{ steps.generate-short-sha.outputs.short-sha }}
+        run: |
+          SLACK_PAYLOAD="$(envsubst < ./.github/assets/build_slack_notification.json)"
+          curl -X POST -H 'Content-type: application/json' \
+          --data "$SLACK_PAYLOAD" \
+          ${{ secrets.HOTFIX_BUILDS_SLACK_WEBHOOK }}
+
+      - name: Upload Packer Params
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >
+          gh release upload
+          --repo cloudboltsoftware/cloudbolt
+          --clobber
+          ${{ inputs.release_tag }}
+          ${{ steps.generate-packer-params.outputs.path }}
+
+      - name: Upload info.json
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >
+          gh release upload
+          --repo cloudboltsoftware/cloudbolt
+          --clobber
+          ${{ inputs.release_tag }}
+          ${{ steps.generate-info-json.outputs.path }}
+
+      - name: Write Location Artifact
+        run: |
+          echo '${{ steps.generate-s3-path.outputs.installer }}' > installer_location.txt
+          echo '${{ steps.generate-s3-path.outputs.upgrader }}' > upgrader_location.txt
+          echo '${{ steps.generate-packer-params.outputs.s3 }}' > packer_params_location.txt
+          cat ./*_location.txt >> $GITHUB_STEP_SUMMARY
+
+      - name: Write Location Artifact
+        run: |
+          echo "$(cat ./*_VERSION)" >> ./branches.txt
+          cat branches.txt
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3_locations
+          path: "*_location.txt"
+          retention-days: 30
+
+      - name: Upload S3 Locations
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >
+          gh release upload
+          --repo cloudboltsoftware/cloudbolt
+          --clobber
+          ${{ inputs.release_tag }}
+          installer_location.txt upgrader_location.txt packer_params_location.txt
+
+      - name: Upload Checksums
+        continue-on-error: true
+        working-directory: main
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >
+          gh release upload
+          --repo cloudboltsoftware/cloudbolt
+          --clobber
+          ${{ inputs.release_tag }}
+          ${{ steps.generate-dir-names.outputs.installer }}/${{ steps.generate-basename.outputs.installer }}.sha256sum
+          ${{ steps.generate-dir-names.outputs.upgrader }}/${{ steps.generate-basename.outputs.upgrader }}.sha256sum
+          ${{ steps.generate-dir-names.outputs.upgrader }}/${{ steps.generate-basename.outputs.installer }}.md5sum
+          ${{ steps.generate-dir-names.outputs.upgrader }}/${{ steps.generate-basename.outputs.upgrader }}.md5sum
+
+      - name: Upload Artifacts
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: branches.txt
+          path: "branches.txt"
+          retention-days: 30
+
+      - name: Validate Installer Binary Files
+        uses: CloudBoltSoftware/validate-tgz-file-sizes-action@v1.0.0
+        continue-on-error: false
+        with:
+          tarball_path: ${{ steps.generate-dir-names.outputs.installer }}/${{ steps.generate-basename.outputs.installer }}
+          json_file_path: ${{ github.workspace }}/main/.github/assets/installer_upgrader_required_files.json
+
+      - name: Validate Upgrader Binary Files
+        uses: CloudBoltSoftware/validate-tgz-file-sizes-action@v1.0.0
+        continue-on-error: false
+        with:
+          tarball_path: ${{ steps.generate-dir-names.outputs.upgrader }}/${{ steps.generate-basename.outputs.upgrader }}
+          json_file_path: ${{ github.workspace }}/main/.github/assets/installer_upgrader_required_files.json
