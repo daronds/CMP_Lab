@@ -108,5 +108,6 @@ def run(job, *args, **kwargs):
 
     # Export to JSON
     export_to_json(folder_structure, json_file_path)
+    set_progress("/static-1.0/vmware_folder_structure.json")
 
-    return "SUCCESS", "VMware folder to CloudBolt group sync completed successfully. /static-1.0/vmware_folder_structure.json", ""
+    return "SUCCESS", "VMware folder to CloudBolt group sync completed successfully.", ""
