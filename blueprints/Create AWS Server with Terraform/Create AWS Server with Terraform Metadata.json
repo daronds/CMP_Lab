@@ -1,0 +1,30 @@
+{
+    "any_group_can_deploy": false,
+    "auto_historical_resources": false,
+    "deployment_items": [],
+    "description": "# AWS EC2 Provisioning Module\r\n\r\nThis Terraform module provisions an EC2 instance with an associated security group, SSH key, and subnet within an existing VPC. It is designed to be reusable and customizable for different environments and configurations.\r\n\r\n## Features\r\n\r\n- **Security Group**: Creates a security group in an existing VPC.\r\n- **SSH Key Pair**: Generates an SSH key pair for EC2 instance access.\r\n- **Subnet**: Adds a subnet to an existing VPC with a specified IP range.\r\n- **EC2 Instance**: Provisions an EC2 instance using the created security group, SSH key, and subnet.\r\n\r\n## Usage\r\n\r\nTo use this module in your Terraform environment, add the module to your configuration and specify the necessary variables:\r\n\r\n```hcl\r\nmodule \"ec2_provisioning\" {\r\n  source = \"path/to/module\"\r\n\r\n  region                = \"us-west-2\"\r\n  vpc_id                = \"vpc-123abcd\"\r\n  security_group_name   = \"example-sg\"\r\n  ssh_port              = 22\r\n  allowed_cidrs         = [\"0.0.0.0/0\"]\r\n  key_name              = \"ec2-keypair\"\r\n  public_key_path       = \"path/to/public/key.pub\"\r\n  subnet_cidr           = \"10.0.1.0/24\"\r\n  availability_zone     = \"us-west-2a\"\r\n  map_public_ip_on_launch = true\r\n  ami_id                = \"ami-abc1234\"\r\n  instance_type         = \"t2.micro\"\r\n  associate_public_ip   = true\r\n  user_data             = \"#!/bin/bash\\necho Hello, World!\"\r\n}",
+    "favorited": false,
+    "icon": "download.png",
+    "id": "BP-vmlnn8v9",
+    "is_manageable": true,
+    "is_orderable": true,
+    "labels": [],
+    "last_updated": "2024-07-15",
+    "management_actions": [],
+    "maximum_version_required": "",
+    "minimum_version_required": "8.6",
+    "name": "Create AWS Server with Terraform",
+    "resource_name_template": null,
+    "resource_type": {
+        "icon": "",
+        "id": "RT-m8aoth2s",
+        "label": "Service",
+        "lifecycle": "ACTIVE",
+        "list_view_columns": [],
+        "name": "service",
+        "plural_label": null
+    },
+    "sequence": 0,
+    "show_recipient_field_on_order_form": false,
+    "teardown_items": []
+}
