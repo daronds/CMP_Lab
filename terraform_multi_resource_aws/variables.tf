@@ -48,7 +48,7 @@ variable "subnet_cidr" {
 variable "availability_zone" {
   description = "Availability Zone to create the subnet in"
   type        = string
-  default     = "ust-east-1a"
+  default     = "us-east-1a"
 }
 
 variable "map_public_ip_on_launch" {
