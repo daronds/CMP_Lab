@@ -1,0 +1,173 @@
+{
+    "any_group_can_deploy": false,
+    "auto_historical_resources": false,
+    "blueprint_image": null,
+    "deployment_items": [
+        {
+            "confirm_terraform_plan": true,
+            "default_tfvars": "{\"owner\": \"\", \"group\": \"\", \"bucket_name\": \"\"}",
+            "deploy_seq": 1,
+            "description": "",
+            "execute_in_parallel": false,
+            "has_environment_option": true,
+            "id": "BDI-n3bifulo",
+            "name": "Create a bucket and add html pages",
+            "plan_directory": "s3_website/tf/",
+            "refresh_on_order": true,
+            "resource_type": {
+                "icon": "fas fa-text-width",
+                "id": "RT-gtpfjlv1",
+                "label": "Terraform Deployment",
+                "lifecycle": "ACTIVE",
+                "list_view_columns": [
+                    {
+                        "allow_multiple": false,
+                        "available_all_servers": false,
+                        "description": "Used as a way to identify servers that were created from Terraform Plans within CloudBolt.",
+                        "field_dependency_controlling_set": [],
+                        "field_dependency_dependent_set": [],
+                        "global_constraints": {},
+                        "global_defaults": [],
+                        "global_options": [],
+                        "has_generated_options_support": false,
+                        "id": "CF-33mxt8rd",
+                        "label": "Created By Terraform",
+                        "name": "created_by_terraform",
+                        "placeholder": null,
+                        "relevant_osfamilies": [],
+                        "required": false,
+                        "show_as_attribute": false,
+                        "show_on_servers": true,
+                        "type": "BOOL",
+                        "value_pattern_string": null
+                    },
+                    {
+                        "allow_multiple": false,
+                        "available_all_servers": false,
+                        "description": "",
+                        "field_dependency_controlling_set": [],
+                        "field_dependency_dependent_set": [],
+                        "global_constraints": {
+                            "maximum": 30,
+                            "minimum": 10
+                        },
+                        "global_defaults": [],
+                        "global_options": [],
+                        "has_generated_options_support": false,
+                        "id": "CF-uknog1zb",
+                        "label": "AWS S3 Bucket Name",
+                        "name": "s3_bucket_name",
+                        "placeholder": "sf-s3-website-001",
+                        "relevant_osfamilies": [],
+                        "required": true,
+                        "show_as_attribute": false,
+                        "show_on_servers": true,
+                        "type": "STR",
+                        "value_pattern_string": ""
+                    }
+                ],
+                "name": "terraform_deployment",
+                "plural_label": "Terraform Deployments"
+            },
+            "show_on_order_form": false,
+            "terraform_version": "/var/opt/cloudbolt/terraform/bin/terraform_1.5.7",
+            "tier_type": "tfoperation",
+            "variable_maps": [
+                {
+                    "created_at": "2024-04-22 14:04:32.307905",
+                    "id": "MAP-s8i295oz",
+                    "map": {
+                        "AWS_ACCESS_KEY_ID": "{{environment.resource_handler.serviceaccount}}",
+                        "AWS_SECRET_ACCESS_KEY": "{{environment.resource_handler.servicepasswd}}"
+                    },
+                    "name": "AWS-to-Terraform Variable Map",
+                    "shared": true,
+                    "updated_at": "2024-04-22 14:04:32.307917"
+                },
+                {
+                    "created_at": "2024-06-21 11:19:01.135479",
+                    "id": "MAP-bsa6c14p",
+                    "map": {
+                        "TF_VAR_bucket_name": "{{s3_bucket_name}}",
+                        "TF_VAR_group": "{{group.name}}",
+                        "TF_VAR_owner": "{{bia.boi.order.owner.full_name}}"
+                    },
+                    "name": "s3_website_inputs",
+                    "shared": true,
+                    "updated_at": "2024-06-21 12:01:02.685704"
+                }
+            ],
+            "working_directory": {
+                "connection_info": null,
+                "git_branch": "main",
+                "label": "Automatically Generated Source Directory for Terraform Operation Create a bucket and add html pages",
+                "local_path": "/var/opt/cloudbolt/working_directories/source_dir_for_tfoperation49dcdaf8-bbb4-496e-a2dc-56dae15d8ccb",
+                "name": "source_dir_for_tfoperation49dcdaf8-bbb4-496e-a2dc-56dae15d8ccb",
+                "replace_existing_directory": true,
+                "source_path_or_url": "https://github.com/omarparlak/CMP_Lab.git",
+                "source_type": "GIT"
+            }
+        }
+    ],
+    "description": "",
+    "favorited": false,
+    "id": "BP-s1raabro",
+    "is_manageable": true,
+    "is_orderable": true,
+    "labels": [],
+    "last_updated": "2024-08-14",
+    "management_actions": [],
+    "maximum_version_required": "",
+    "minimum_version_required": "8.6",
+    "name": "S3 Website by terraform",
+    "resource_name_template": null,
+    "resource_type": {
+        "icon": "fas fa-text-width",
+        "id": "RT-gtpfjlv1",
+        "label": "Terraform Deployment",
+        "lifecycle": "ACTIVE",
+        "list_view_columns": [
+            {
+                "allow_multiple": false,
+                "available_all_servers": false,
+                "description": "Used as a way to identify servers that were created from Terraform Plans within CloudBolt.",
+                "field_dependency_controlling_set": [],
+                "field_dependency_dependent_set": [],
+                "global_options": [],
+                "id": "CF-33mxt8rd",
+                "label": "Created By Terraform",
+                "name": "created_by_terraform",
+                "placeholder": null,
+                "relevant_osfamilies": [],
+                "required": false,
+                "show_as_attribute": false,
+                "show_on_servers": true,
+                "type": "BOOL",
+                "value_pattern_string": null
+            },
+            {
+                "allow_multiple": false,
+                "available_all_servers": false,
+                "description": "",
+                "field_dependency_controlling_set": [],
+                "field_dependency_dependent_set": [],
+                "global_options": [],
+                "id": "CF-uknog1zb",
+                "label": "AWS S3 Bucket Name",
+                "name": "s3_bucket_name",
+                "placeholder": "sf-s3-website-001",
+                "relevant_osfamilies": [],
+                "required": true,
+                "show_as_attribute": false,
+                "show_on_servers": true,
+                "type": "STR",
+                "value_pattern_string": ""
+            }
+        ],
+        "name": "terraform_deployment",
+        "plural_label": "Terraform Deployments"
+    },
+    "sequence": 0,
+    "show_recipient_field_on_order_form": false,
+    "teardown_items": []
+}
