@@ -1,0 +1,14 @@
+{
+    "description": "Sample action that can be used in various contexts to reboot the\n            server(s) available to that context, or modified to reboot some subset thereof.",
+    "id": "OHK-e9nm5u4t",
+    "last_updated": "2024-08-15",
+    "max_retries": 0,
+    "maximum_version_required": "",
+    "minimum_version_required": "8.6",
+    "name": "Reboot Server(s)",
+    "resource_technologies": [],
+    "script_filename": "Reboot Server(s) Script.py",
+    "shared": true,
+    "target_os_families": [],
+    "type": "CloudBolt Plug-in"
+}

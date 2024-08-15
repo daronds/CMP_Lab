@@ -1,0 +1,137 @@
+{
+    "any_group_can_deploy": true,
+    "auto_historical_resources": false,
+    "blueprint_image": null,
+    "deployment_items": [
+        {
+            "confirm_terraform_plan": false,
+            "default_tfvars": "{\"owner\": \"newuser\", \"group\": \"IT\", \"ami_id\": \"ami-#################\", \"instance_type\": \"t3.micro\", \"ec2_name\": \"ec2-tst-001\", \"subnet_id\": \"subnet-########\", \"associate_public_ip_address\": false}",
+            "deploy_seq": 1,
+            "description": "",
+            "execute_in_parallel": false,
+            "has_environment_option": true,
+            "id": "BDI-fhg2coqu",
+            "name": "Source Code Repository",
+            "plan_directory": "how_do_i_videos/use_terraform_operations/terraform/ec2_basic/",
+            "refresh_on_order": false,
+            "resource_type": {
+                "icon": "",
+                "id": "RT-j2ffmtta",
+                "label": "Service",
+                "lifecycle": "ACTIVE",
+                "list_view_columns": [],
+                "name": "service",
+                "plural_label": null
+            },
+            "show_on_order_form": false,
+            "terraform_version": "/var/opt/cloudbolt/terraform/bin/terraform_1.8.5",
+            "tier_type": "tfoperation",
+            "variable_maps": [
+                {
+                    "created_at": "2024-04-22 14:04:32.307905",
+                    "id": "MAP-s8i295oz",
+                    "map": {
+                        "AWS_ACCESS_KEY_ID": "{{environment.resource_handler.serviceaccount}}",
+                        "AWS_SECRET_ACCESS_KEY": "{{environment.resource_handler.servicepasswd}}"
+                    },
+                    "name": "AWS-to-Terraform Variable Map",
+                    "shared": true,
+                    "updated_at": "2024-04-22 14:04:32.307917"
+                },
+                {
+                    "created_at": "2024-06-21 11:19:01.135479",
+                    "id": "MAP-bsa6c14p",
+                    "map": {
+                        "TF_VAR_bucket_name": "{{s3_bucket_name}}",
+                        "TF_VAR_group": "{{group.name}}",
+                        "TF_VAR_owner": "{{bia.boi.order.owner.full_name}}"
+                    },
+                    "name": "s3_website_inputs",
+                    "shared": true,
+                    "updated_at": "2024-06-21 12:01:02.685704"
+                },
+                {
+                    "created_at": "2024-06-21 12:36:05.270915",
+                    "id": "MAP-akflam6t",
+                    "map": {
+                        "TF_VAR_group": "{{group.name}}",
+                        "TF_VAR_owner": "{{bia.boi.order.owner.full_name}}"
+                    },
+                    "name": "aws_tags",
+                    "shared": true,
+                    "updated_at": "2024-06-21 12:36:05.270929"
+                },
+                {
+                    "created_at": "2024-06-21 12:26:57.047713",
+                    "id": "MAP-pglz4bvf",
+                    "map": {
+                        "TF_VAR_allowed_cidrs": "[\"0.0.0.0/0\"]",
+                        "TF_VAR_ami_id": "ami-0b72821e2f351e396",
+                        "TF_VAR_associate_public_ip": "{{}}",
+                        "TF_VAR_availability_zone": "{{aws_availability_zone}}",
+                        "TF_VAR_instance_type": "{{instance_type}}",
+                        "TF_VAR_key_name": "{{aws_key_name}}",
+                        "TF_VAR_map_public_ip_on_launch": "true",
+                        "TF_VAR_public_key_path": "/terraform_multi_resource_aws/id_rsa.pub",
+                        "TF_VAR_region": "{{tf_aws_region}}",
+                        "TF_VAR_security_group_name": "{{tf_aws_sg_name}}",
+                        "TF_VAR_ssh_port": "{{tf_aws_sg_ingress_port}}",
+                        "TF_VAR_subnet_cidr": "10.133.1.0/24",
+                        "TF_VAR_user_data": "#!/bin/bash\nsudo yum update -y\nsudo yum install -y httpd",
+                        "TF_VAR_vpc_id": "{{vpc-0b7d3c84f12cc1ce6}}"
+                    },
+                    "name": "ec2_inputs",
+                    "shared": true,
+                    "updated_at": "2024-07-15 15:42:46.972495"
+                }
+            ],
+            "working_directory": {
+                "connection_info": null,
+                "git_branch": "master",
+                "label": "Automatically Generated Source Directory for Terraform Operation Source Code Repository",
+                "local_path": "/var/opt/cloudbolt/working_directories/source_dir_for_tfoperation56dad701-27c2-4afb-816b-cf3a91bdc17e",
+                "name": "source_dir_for_tfoperation56dad701-27c2-4afb-816b-cf3a91bdc17e",
+                "replace_existing_directory": true,
+                "source_path_or_url": "https://github.com/CloudBoltSoftware/cloudbolt-forge.git",
+                "source_type": "GIT"
+            }
+        },
+        {
+            "action_name": "Reboot Server(s)",
+            "continue_on_failure": false,
+            "deploy_seq": 2,
+            "description": null,
+            "enabled": true,
+            "execute_in_parallel": false,
+            "id": "BDI-uf04gjq7",
+            "name": "Reboot Server(s)",
+            "run_on_scale_up": true,
+            "show_on_order_form": false,
+            "tier_type": "plugin"
+        }
+    ],
+    "description": "",
+    "favorited": false,
+    "id": "BP-t6gotlql",
+    "is_manageable": true,
+    "is_orderable": true,
+    "labels": [],
+    "last_updated": "2024-08-15",
+    "management_actions": [],
+    "maximum_version_required": "",
+    "minimum_version_required": "8.6",
+    "name": "Source Control Test",
+    "resource_name_template": null,
+    "resource_type": {
+        "icon": "",
+        "id": "RT-j2ffmtta",
+        "label": "Service",
+        "lifecycle": "ACTIVE",
+        "list_view_columns": [],
+        "name": "service",
+        "plural_label": null
+    },
+    "sequence": 0,
+    "show_recipient_field_on_order_form": false,
+    "teardown_items": []
+}
