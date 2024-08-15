@@ -12,7 +12,7 @@
             "environment_selection_orchestration": null,
             "execute_in_parallel": false,
             "hostname_template": "CS-LINUX-RHEL9-00X",
-            "id": "BDI-ppde2w8w",
+            "id": "BDI-lfjxgik1",
             "name": "RHEL9.2 Template",
             "os_build": null,
             "restrict_applications": false,
@@ -20,14 +20,14 @@
             "tier_type": "server"
         },
         {
-            "action_name": "Reboot Server(s)",
+            "action_name": "remote_action.py",
             "continue_on_failure": false,
-            "deploy_seq": 2,
+            "deploy_seq": 3,
             "description": null,
             "enabled": true,
             "execute_in_parallel": false,
-            "id": "BDI-cpf326cq",
-            "name": "Reboot Server(s)",
+            "id": "BDI-w7h316ax",
+            "name": "remote_action.py",
             "run_on_scale_up": true,
             "show_on_order_form": false,
             "tier_type": "plugin"
